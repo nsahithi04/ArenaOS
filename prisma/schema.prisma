@@ -1,0 +1,456 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── NextAuth required models ────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Roles & Users ───────────────────────────────────────────────────────────
+
+enum Role {
+  PLAYER
+  VENUE_OWNER
+  STAFF
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  phone         String?
+  role          Role      @default(PLAYER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Venues this user owns (VENUE_OWNER)
+  ownedVenues Venue[] @relation("VenueOwner")
+
+  // Venue this user works at (STAFF)
+  staffVenueId String?
+  staffVenue   Venue?  @relation("VenueStaff", fields: [staffVenueId], references: [id])
+
+  accounts              Account[]
+  sessions              Session[]
+  notificationPrefs     NotificationPrefs?
+  venueMemberships      VenueMember[]
+  bookingsCreated       Booking[]    @relation("BookingCreatedBy")
+  paymentsRecorded      Payment[]    @relation("PaymentRecordedBy")
+  courtBlocksCreated    CourtBlock[] @relation("CourtBlockCreatedBy")
+}
+
+model NotificationPrefs {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  newBooking     Boolean @default(false)
+  cancellation   Boolean @default(false)
+  payment        Boolean @default(false)
+  checkin        Boolean @default(false)
+  dailySummary   Boolean @default(false)
+  weeklySummary  Boolean @default(false)
+  lowOccupancy   Boolean @default(false)
+  smsAlerts      Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Venue ───────────────────────────────────────────────────────────────────
+
+enum VenueType {
+  PRIVATE
+  PUBLIC
+  SEMI_PUBLIC
+}
+
+enum VenueStatus {
+  ACTIVE
+  TEMPORARILY_CLOSED
+  MAINTENANCE
+}
+
+enum OnboardingStep {
+  FACILITY
+  SPORTS
+  HOURS
+  COURTS
+  PRICING
+  DONE
+}
+
+model Venue {
+  id              String         @id @default(cuid())
+  name            String
+  slug            String         @unique
+  description     String?
+  type            VenueType      @default(PRIVATE)
+  status          VenueStatus    @default(ACTIVE)
+  phone           String?
+  email           String?
+  website         String?
+  address         String?
+  city            String?
+  state           String?
+  zip             String?
+  country         String?
+  latitude        Float?
+  longitude       Float?
+  timezone        String         @default("UTC") // IANA zone, e.g. America/Phoenix
+  currency        String         @default("USD") // ISO 4217 code used for display
+  onboardingStep  OnboardingStep @default(FACILITY)
+  isSetupDone     Boolean        @default(false)
+  ownerId         String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  owner          User             @relation("VenueOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  staff          User[]           @relation("VenueStaff")
+  courts         Court[]
+  sports         Sport[]
+  images         VenueImage[]
+  amenities      VenueAmenity[]
+  operatingHours OperatingHours[]
+  pricingRules   PricingRule[]
+  bookings       Booking[]
+  walkIns        WalkInBooking[]
+  courtBlocks    CourtBlock[]
+  venueRoles     VenueRole[]
+  venueMembers   VenueMember[]
+}
+
+// ─── Venue Roles & Members ────────────────────────────────────────────────────
+
+model VenueRole {
+  id          String   @id @default(cuid())
+  venueId     String
+  name        String
+  color       String   @default("#16a34a")
+  // permissions stored as JSON: { bookings, venue, reports, billing, team }
+  // each value: "none" | "view" | "edit"
+  permissions Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  venue   Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  members VenueMember[]
+}
+
+model VenueMember {
+  id        String   @id @default(cuid())
+  venueId   String
+  userId    String?
+  roleId    String?
+  email     String
+  name      String
+  status        String    @default("invited") // invited | active
+  inviteToken   String?   @unique
+  inviteExpiry  DateTime?
+  createdAt     DateTime  @default(now())
+
+  venue Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  role  VenueRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  user  User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([venueId, email])
+}
+
+// ─── Venue Amenities ──────────────────────────────────────────────────────────
+
+model VenueAmenity {
+  id      String @id @default(cuid())
+  venueId String
+  name    String
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, name])
+}
+
+// ─── Venue Images ─────────────────────────────────────────────────────────────
+
+model VenueImage {
+  id       String  @id @default(cuid())
+  venueId  String
+  imageUrl String
+  isCover  Boolean @default(false)
+  isLogo   Boolean @default(false)
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+}
+
+// ─── Sports (venue-specific, no hardcoded enum) ───────────────────────────────
+
+model Sport {
+  id      String @id @default(cuid())
+  venueId String
+  name    String
+  emoji   String?
+
+  venue          Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  courts         Court[]
+  operatingHours OperatingHours[]
+  pricingRules   PricingRule[]
+  bookings       Booking[]
+
+  @@unique([venueId, name])
+}
+
+// ─── Courts ──────────────────────────────────────────────────────────────────
+
+enum CourtType {
+  INDOOR
+  OUTDOOR
+}
+
+model Court {
+  id          String    @id @default(cuid())
+  venueId     String
+  sportId     String?
+  name        String
+  type        CourtType @default(INDOOR)
+  capacity    Int       @default(4)
+  description String?
+  images      String[]  @default([])
+  isActive    Boolean   @default(true)
+  isAvailable Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  venue        Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport        Sport?        @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  bookings     Booking[]
+  pricingRules PricingRule[]
+  blocks       CourtBlock[]
+}
+
+// ─── Operating Hours ─────────────────────────────────────────────────────────
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+model OperatingHours {
+  id        String    @id @default(cuid())
+  venueId   String
+  sportId   String?
+  day       DayOfWeek
+  openTime  String
+  closeTime String
+  isClosed  Boolean   @default(false)
+
+  venue Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport Sport? @relation(fields: [sportId], references: [id], onDelete: Cascade)
+}
+
+// ─── Pricing ─────────────────────────────────────────────────────────────────
+
+model PricingRule {
+  id        String   @id @default(cuid())
+  venueId   String
+  sportId   String?
+  courtId   String?
+  label     String
+  days      String
+  startTime String
+  endTime   String
+  priceUsd  Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  venue Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport Sport? @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  court Court? @relation(fields: [courtId], references: [id])
+}
+
+// ─── Bookings ────────────────────────────────────────────────────────────────
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+}
+
+enum BookingSource {
+  WALK_IN
+  PHONE
+  WHATSAPP
+  GAMEON
+  PLAYO
+  DISTRICT
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  ONLINE
+  OTHER
+}
+
+enum PaymentKind {
+  PAYMENT
+  REFUND
+}
+
+// No two non-cancelled bookings may overlap on the same court. This is enforced in
+// PostgreSQL by the "Booking_no_overlap" exclusion constraint (see migration
+// 1_phase1_booking_engine), which Prisma cannot express in this schema.
+model Booking {
+  id           String        @id @default(cuid())
+  venueId      String
+  courtId      String
+  sportId      String?
+  customer     String
+  phone        String?
+  email        String?
+  sport        String? // display name snapshot (legacy rows have no sportId)
+  source       BookingSource @default(OTHER)
+  startTime    DateTime
+  endTime      DateTime
+  amountUsd    Decimal       @db.Decimal(10, 2) // booked price, in the venue currency
+  priceOverridden Boolean    @default(false)
+  payment      PaymentStatus @default(PENDING) // summary, derived from Payment rows
+  status       BookingStatus @default(CONFIRMED)
+  notes        String?
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdById  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  venue     Venue     @relation(fields: [venueId], references: [id])
+  court     Court     @relation(fields: [courtId], references: [id])
+  sportRef  Sport?    @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  createdBy User?     @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  payments  Payment[]
+
+  @@index([venueId, startTime])
+  @@index([courtId, startTime])
+}
+
+// Money actually received (PAYMENT) or returned (REFUND) for a booking.
+// Collected revenue is computed from these rows, never from Booking.amountUsd.
+model Payment {
+  id           String        @id @default(cuid())
+  bookingId    String
+  venueId      String
+  kind         PaymentKind   @default(PAYMENT)
+  method       PaymentMethod
+  amount       Decimal       @db.Decimal(10, 2)
+  receivedAt   DateTime      @default(now())
+  note         String?
+  recordedById String?
+  createdAt    DateTime      @default(now())
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  recordedBy User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([venueId, receivedAt])
+  @@index([bookingId])
+}
+
+// Maintenance / unavailable periods for a court. Non-overlapping per court
+// ("CourtBlock_no_overlap" exclusion constraint).
+model CourtBlock {
+  id          String   @id @default(cuid())
+  venueId     String
+  courtId     String
+  startTime   DateTime
+  endTime     DateTime
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  venue     Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  court     Court @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CourtBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([courtId, startTime])
+}
+
+// ─── Password Reset OTP ──────────────────────────────────────────────────────
+
+model PasswordResetOtp {
+  id        String   @id @default(cuid())
+  email     String
+  otp       String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ─── Walk-in Bookings (DEPRECATED) ───────────────────────────────────────────
+// Unused. Walk-ins are stored in Booking with source = WALK_IN so the no-overlap
+// constraint covers them. Kept only to avoid a destructive drop; remove later.
+
+model WalkInBooking {
+  id           String   @id @default(cuid())
+  venueId      String
+  courtId      String?
+  customerName String
+  phone        String?
+  sport        String?
+  startTime    DateTime
+  endTime      DateTime
+  amountUsd    Decimal  @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  venue Venue @relation(fields: [venueId], references: [id])
+}
