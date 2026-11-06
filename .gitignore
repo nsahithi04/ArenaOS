@@ -1,18 +1,35 @@
 # dependencies
 node_modules/
 
-# next.js
+# next.js / typescript build output
 .next/
 out/
+*.tsbuildinfo
+next-env.d.ts
 
-# environment — never commit real secrets
+# environment — never commit real secrets (.env.local.example is the template)
 .env
 .env.local
 .env.*.local
+.env.test
+.env.production
 
 # prisma
 prisma/migrations/dev.db
 
+# database dumps / backups
+*.dump
+*.sql.gz
+
+# testing
+coverage/
+
+# local tooling / editors
+.claude/
+.vscode/
+.idea/
+
 # misc
 .DS_Store
 *.pem
+*.log

@@ -95,6 +95,8 @@ export default function FacilitySettingsPage() {
   const [venueId, setVenueId] = useState<string | null>(null)
   const [form, setForm] = useState<Form>({ name: '', description: '', phone: '', email: '', website: '', address: '', city: '', state: '', zip: '', country: '' })
   const [facilityType, setFacilityType] = useState('Private')
+  const [timezone, setTimezone] = useState('UTC')
+  const [currency, setCurrency] = useState('USD')
   const [amenities, setAmenities] = useState<string[]>([])
   const [amenityInput, setAmenityInput] = useState('')
   const [logo, setLogo] = useState<UploadedImage | null>(null)
@@ -115,6 +117,8 @@ export default function FacilitySettingsPage() {
         setVenueId(venue.id)
         setForm({ name: venue.name ?? '', description: venue.description ?? '', phone: venue.phone ?? '', email: venue.email ?? '', website: venue.website ?? '', address: venue.address ?? '', city: venue.city ?? '', state: venue.state ?? '', zip: venue.zip ?? '', country: venue.country ?? '' })
         setFacilityType(ENUM_TO_TYPE[venue.type] ?? 'Private')
+        setTimezone(venue.timezone ?? 'UTC')
+        setCurrency(venue.currency ?? 'USD')
         setAmenities((venue.amenities ?? []).map((a: { name: string }) => a.name))
         const imgs = venue.images ?? []
         const logoImg = imgs.find((i: { isLogo: boolean }) => i.isLogo)
@@ -161,7 +165,7 @@ export default function FacilitySettingsPage() {
       const res = await fetch(`/api/venues/${venueId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, type: facilityType, amenities, logoUrl: logo?.url ?? null, coverUrl: cover?.url ?? null, galleryUrls: gallery.map((img) => img.url).filter(Boolean) }),
+        body: JSON.stringify({ ...form, type: facilityType, timezone, currency, amenities, logoUrl: logo?.url ?? null, coverUrl: cover?.url ?? null, galleryUrls: gallery.map((img) => img.url).filter(Boolean) }),
       })
       if (!res.ok) { setError((await res.json()).error ?? 'Save failed'); return }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
@@ -293,6 +297,19 @@ export default function FacilitySettingsPage() {
               <label className="block text-sm font-medium mb-1.5">Country</label>
               <input value={form.country} onChange={set('country')} placeholder="United States" className={inp} />
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Time Zone</label>
+              <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={inp}>
+                {timeZoneOptions(timezone).map((tz) => <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>)}
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">Bookings, the calendar and the dashboard use this time zone.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Currency</label>
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)} className={inp}>
+                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -328,4 +345,16 @@ export default function FacilitySettingsPage() {
       </div>
     </div>
   )
+}
+
+const CURRENCIES = ['USD', 'INR', 'EUR', 'GBP', 'AUD', 'CAD', 'SGD', 'AED']
+
+function timeZoneOptions(current: string): string[] {
+  let zones: string[] = []
+  try {
+    zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? []
+  } catch { /* older browsers */ }
+  if (!zones.length) zones = ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'Europe/London', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Australia/Sydney']
+  if (!zones.includes('UTC')) zones = ['UTC', ...zones]
+  return zones.includes(current) ? zones : [current, ...zones]
 }

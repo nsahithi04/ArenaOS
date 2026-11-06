@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
+import { isValidTimeZone } from '@/lib/booking/time'
+
+const CURRENCY_RE = /^[A-Z]{3}$/
 
 const TYPE_MAP: Record<string, 'PRIVATE' | 'PUBLIC' | 'SEMI_PUBLIC'> = {
   Private: 'PRIVATE', Public: 'PUBLIC', 'Semi-Public': 'SEMI_PUBLIC',
@@ -28,7 +31,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
     if (!venue) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-    const { name, description, phone, email, website, address, city, state, zip, country, type, logoUrl, coverUrl, galleryUrls, amenities } = await req.json()
+    const { name, description, phone, email, website, address, city, state, zip, country, type, logoUrl, coverUrl, galleryUrls, amenities, timezone, currency } = await req.json()
+
+    if (timezone !== undefined && (typeof timezone !== 'string' || !isValidTimeZone(timezone))) {
+      return NextResponse.json({ error: 'Unknown time zone' }, { status: 400 })
+    }
+    if (currency !== undefined && (typeof currency !== 'string' || !CURRENCY_RE.test(currency))) {
+      return NextResponse.json({ error: 'Currency must be a 3-letter ISO code' }, { status: 400 })
+    }
 
     const updated = await prisma.venue.update({
       where: { id },
@@ -36,6 +46,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ...(name && { name }),
         description, phone, email, website, address, city, state, zip, country,
         ...(type && { type: TYPE_MAP[type] ?? venue.type }),
+        ...(timezone && { timezone }),
+        ...(currency && { currency }),
       },
     })
 

@@ -7,6 +7,7 @@ type CourtImage = { preview: string; url: string | null; uploading: boolean }
 
 type CourtRow = {
   id: number
+  dbId?: string // database id of a saved court; lets the API update instead of recreate
   name: string
   type: 'Indoor' | 'Outdoor'
   capacity: number
@@ -97,8 +98,9 @@ export default function CourtsSettingsPage() {
         if (!venue) return
         setVenueId(venue.id)
 
-        type SavedCourt = { id: string; sportId: string | null; name: string; type: string; capacity: number; description: string | null; images: string[] }
-        const savedCourts: SavedCourt[] = venue.courts ?? []
+        type SavedCourt = { id: string; sportId: string | null; name: string; type: string; capacity: number; description: string | null; images: string[]; isActive: boolean }
+        // Deactivated courts (removed but still referenced by bookings) stay hidden.
+        const savedCourts: SavedCourt[] = (venue.courts ?? []).filter((c: SavedCourt) => c.isActive !== false)
 
         setSports(
           (venue.sports ?? []).map((s: { id: string; name: string; emoji?: string }) => {
@@ -106,6 +108,7 @@ export default function CourtsSettingsPage() {
               .filter((c) => c.sportId === s.id)
               .map((c) => ({
                 id: Date.now() + Math.random(),
+                dbId: c.id,
                 name: c.name,
                 type: (c.type === 'OUTDOOR' ? 'Outdoor' : 'Indoor') as 'Indoor' | 'Outdoor',
                 capacity: c.capacity,
@@ -172,6 +175,7 @@ export default function CourtsSettingsPage() {
     try {
       const allCourts = sports.flatMap((s) =>
         s.courts.map((c) => ({
+          id: c.dbId,
           name: c.name, type: c.type, capacity: c.capacity, description: c.description,
           sportId: s.sportId, images: c.images.map((img) => img.url).filter(Boolean),
         }))

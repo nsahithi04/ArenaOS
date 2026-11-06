@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut, SessionProvider, useSession } from "next-auth/react";
-import { Logo } from "@/components/logo";
-import { usePermissions } from "@/hooks/usePermissions";
+import { Toaster } from "sonner";
+import { Logo } from "@/components/brand/logo";
+import { usePermissions } from "@/hooks/use-permissions";
 import {
   LayoutDashboard,
   Calendar,
@@ -29,6 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <AppShell>{children}</AppShell>
+      <Toaster position="top-right" richColors closeButton />
     </SessionProvider>
   );
 }
@@ -38,6 +40,11 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const [venueName, setVenueName] = useState("Your Venue");
   const pathname = usePathname();
   const router = useRouter();
+
+  // Start collapsed on phone-sized screens so content has room.
+  useEffect(() => {
+    if (window.innerWidth < 768) setCollapsed(true);
+  }, []);
 
   useEffect(() => {
     fetch("/api/venues")
@@ -190,7 +197,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar */}
-        <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-border flex-shrink-0">
+        <header className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3.5 bg-white border-b border-border flex-shrink-0">
           <div className="relative">
             <Search
               size={16}
@@ -198,7 +205,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             />
             <input
               placeholder="Search bookings, courts..."
-              className="pl-9 pr-4 py-2 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-primary/20 w-64 placeholder:text-muted-foreground"
+              className="pl-9 pr-4 py-2 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-primary/20 w-36 sm:w-64 placeholder:text-muted-foreground"
             />
           </div>
           <div className="flex items-center gap-3">
@@ -213,7 +220,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
               <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
                 <User size={14} className="text-green-600" />
               </div>
-              <span className="text-sm font-medium">{session?.user?.name ?? 'Account'}</span>
+              <span className="text-sm font-medium hidden sm:inline">{session?.user?.name ?? 'Account'}</span>
             </button>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}

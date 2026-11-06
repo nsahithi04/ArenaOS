@@ -1,62 +1,47 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
+import { handleError, readJson, requireVenue } from '@/lib/booking/route-helpers'
 
-async function assertVenueAccess(userId: string, venueId: string) {
-  // Owner check
-  const owned = await prisma.venue.findFirst({ where: { id: venueId, ownerId: userId } })
-  if (owned) return true
-  // Active member check
-  const member = await prisma.venueMember.findFirst({ where: { venueId, userId, status: 'active' } })
-  return !!member
-}
-
+// GET /api/courts?venueId — active courts (needs bookings:view)
 export async function GET(req: Request) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { searchParams } = new URL(req.url)
-  const venueId = searchParams.get('venueId')
-  if (!venueId) return NextResponse.json({ error: 'venueId required' }, { status: 400 })
-
-  if (!(await assertVenueAccess(session.user.id, venueId))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const ctx = await requireVenue(new URL(req.url).searchParams.get('venueId'), 'bookings', 'view')
+  if (ctx instanceof Response) return ctx
 
   const courts = await prisma.court.findMany({
-    where: { venueId, isActive: true },
+    where: { venueId: ctx.access.venueId, isActive: true },
     orderBy: { name: 'asc' },
   })
-
   return NextResponse.json(courts)
 }
 
+// POST /api/courts — add a single court (needs venue:edit)
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   try {
-    const { venueId, sportId, name, type, capacity, description, images } = await req.json()
-    if (!venueId || !name) return NextResponse.json({ error: 'venueId and name are required' }, { status: 400 })
+    const { venueId, sportId, name, type, capacity, description, images } = (await readJson(req)) as Record<string, unknown>
+    if (typeof name !== 'string' || !name.trim() || name.length > 80) {
+      return NextResponse.json({ error: 'name is required (max 80 characters)' }, { status: 400 })
+    }
+    const ctx = await requireVenue(typeof venueId === 'string' ? venueId : null, 'venue', 'edit')
+    if (ctx instanceof Response) return ctx
 
-    if (!(await assertVenueAccess(session.user.id, venueId))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (typeof sportId === 'string' && sportId) {
+      const sport = await prisma.sport.findFirst({ where: { id: sportId, venueId: ctx.access.venueId } })
+      if (!sport) return NextResponse.json({ error: 'Sport not found for this venue' }, { status: 400 })
     }
 
     const court = await prisma.court.create({
       data: {
-        venueId,
-        sportId: sportId ?? null,
-        name,
+        venueId: ctx.access.venueId,
+        sportId: typeof sportId === 'string' && sportId ? sportId : null,
+        name: name.trim(),
         type: type === 'OUTDOOR' ? 'OUTDOOR' : 'INDOOR',
-        capacity: capacity ?? 4,
-        description: description ?? null,
-        images: images ?? [],
+        capacity: Number.isInteger(capacity) && (capacity as number) > 0 ? (capacity as number) : 4,
+        description: typeof description === 'string' ? description : null,
+        images: Array.isArray(images) ? images.filter((i): i is string => typeof i === 'string') : [],
       },
     })
     return NextResponse.json(court, { status: 201 })
   } catch (err) {
-    console.error('[courts POST]', err)
-    return NextResponse.json({ error: 'Failed to create court' }, { status: 500 })
+    return handleError(err, 'courts POST')
   }
 }

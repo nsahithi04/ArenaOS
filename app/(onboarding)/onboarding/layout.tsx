@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { Logo } from '@/components/logo'
+import { Logo } from '@/components/brand/logo'
 import { Building2, Dumbbell, Clock, DollarSign, Check, ClipboardList } from 'lucide-react'
 
 const steps = [

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Logo } from '@/components/logo'
+import { Logo } from '@/components/brand/logo'
 import { ArrowLeft, ArrowRight, Mail, Shield, Eye, EyeOff, Check, RefreshCw } from 'lucide-react'
 
 function ForgotPasswordContent() {

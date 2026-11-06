@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Logo } from '@/components/logo'
+import { Logo } from '@/components/brand/logo'
 import { Eye, EyeOff, ArrowRight, Check } from 'lucide-react'
 
 export default function SignupPage() {

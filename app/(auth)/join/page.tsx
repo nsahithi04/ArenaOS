@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { signIn, useSession } from 'next-auth/react'
-import { Logo } from '@/components/logo'
+import { Logo } from '@/components/brand/logo'
 import { Eye, EyeOff, Check, Loader2 } from 'lucide-react'
 
 type InviteInfo = {

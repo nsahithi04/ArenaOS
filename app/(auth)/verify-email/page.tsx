@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { signIn } from 'next-auth/react'
-import { Logo } from '@/components/logo'
+import { Logo } from '@/components/brand/logo'
 import { Shield, ArrowLeft, RefreshCw, ArrowRight } from 'lucide-react'
 
 function VerifyEmailContent() {
