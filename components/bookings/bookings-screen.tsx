@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Search, Calendar, XCircle, RefreshCw, UserCheck, Filter, Download, X } from "lucide-react";
 import {
@@ -19,8 +20,18 @@ const PAGE_SIZE = 25;
 export function BookingsScreen() {
   const { ctx, error: ctxError, loading: ctxLoading, reload: reloadCtx } = useBookingContext();
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchParams = useSearchParams();
+  const urlQuery = searchParams.get("q") ?? "";
+  const [search, setSearch] = useState(urlQuery);
+  const [debouncedSearch, setDebouncedSearch] = useState(urlQuery.trim());
+
+  // Top-bar search: a new ?q= replaces the current search and shows all bookings.
+  useEffect(() => {
+    if (!searchParams.has("q")) return;
+    setSearch(urlQuery);
+    setDebouncedSearch(urlQuery.trim());
+    setActiveTab("all");
+  }, [searchParams, urlQuery]);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);

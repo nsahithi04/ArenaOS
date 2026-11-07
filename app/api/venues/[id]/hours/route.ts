@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
+import { requireVenue } from '@/lib/booking/route-helpers'
 import { prisma } from '@/lib/db'
 import { DayOfWeek } from '@prisma/client'
 
@@ -12,13 +12,11 @@ type DayRow = { day: string; open: string; close: string; isClosed: boolean }
 type SportHoursPayload = { sportId: string; hours: DayRow[] }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id } = await params
+  const ctx = await requireVenue(id, 'venue', 'edit')
+  if (ctx instanceof Response) return ctx
 
   try {
-    const { id } = await params
-    const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
-    if (!venue) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     const { sports } = await req.json() as { sports: SportHoursPayload[] }
 

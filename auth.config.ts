@@ -21,6 +21,7 @@ export const authConfig = {
       session.user.id               = (token.id   ?? '') as string
       session.user.role             = (token.role ?? 'PLAYER') as string
       session.user.venueId          = (token.venueId ?? null) as string | null
+      session.user.isOwner          = token.isOwner === true
       session.user.venuePermissions = (token.venuePermissions ?? NO_PERMISSIONS) as VenuePermissions
       return session
     },

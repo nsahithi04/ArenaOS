@@ -20,7 +20,17 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
   - occupancy, pending payments, cancellations
   - online vs offline split, revenue by sport and by court, trends
   - date ranges: today, this week, this month or custom
-- **Team and permissions:** custom roles with `none`, `view` or `edit` on bookings, venue, reports, billing and team, enforced on the server
+- **Team and permissions:** three levels, enforced on the server:
+  | | Owner | Manager | Employee |
+  |---|---|---|---|
+  | Calendar and bookings (create, check in, take payments) | ✓ | ✓ | ✓ |
+  | Dashboard, revenue and reports | ✓ | ✓ | – |
+  | Refunds | ✓ | ✓ | – |
+  | Venue settings (facility, sports, courts, hours, pricing) | ✓ | ✓ | – |
+  | Invite and remove employees | ✓ | ✓ | – |
+  | Add or remove managers, create custom roles | ✓ | – | – |
+
+  Manager and Employee are built-in roles on every venue. Owners can also create custom roles with `none`, `view` or `edit` on bookings, venue, reports, billing and team.
 
 ## Tech stack
 
@@ -50,6 +60,7 @@ components/
   brand/             logo
 hooks/               client hooks (use-permissions)
 lib/
+  team/              built-in roles (Manager, Employee) and team rules
   booking/           booking engine: time zones, pricing, availability, validation,
                      access control, service (transactions), queries, dashboard metrics
   db.ts, mail.ts, cloudinary.ts, permissions.ts, slug.ts
@@ -165,7 +176,7 @@ pnpm test
 pnpm demo:seed
 ```
 This adds a ready-made demo venue (3 courts, sample bookings and a maintenance block, in Phoenix time) to your **local** `gameon`
-database. Then run `pnpm dev` and sign in with the demo logins listed at the top of `scripts/demo-seed.mjs` (an owner, and a view-only staff member).
+database. Then run `pnpm dev` and sign in with the demo logins listed at the top of `scripts/demo-seed.mjs`: one owner, one manager and one employee, so you can compare what each role sees.
 Re-running it resets only the demo venue and demo accounts; your other data is untouched. It refuses to run against a non-local database.
 
 ## Deployment notes

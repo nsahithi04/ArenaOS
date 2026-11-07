@@ -1,36 +1,53 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
+import { handleError, jsonError, readJson, requireVenue } from '@/lib/booking/route-helpers'
+import { parsePermissions } from '@/lib/team/presets'
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; roleId: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+type Params = { params: Promise<{ id: string; roleId: string }> }
+
+async function ownerAndRole(id: string, roleId: string) {
+  const ctx = await requireVenue(id, 'team', 'edit')
+  if (ctx instanceof Response) return ctx
+  if (!ctx.access.isOwner) return jsonError(403, 'Only the owner can change roles')
+  const role = await prisma.venueRole.findFirst({ where: { id: roleId, venueId: id } })
+  if (!role) return jsonError(404, 'Role not found')
+  if (role.preset) return jsonError(403, `${role.name} is a built-in role and can't be changed`)
+  return role
+}
+
+// PATCH /api/venues/:id/roles/:roleId — edit a custom role (owner only)
+export async function PATCH(req: Request, { params }: Params) {
   const { id, roleId } = await params
-  const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
-  if (!venue) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
+  const role = await ownerAndRole(id, roleId)
+  if (role instanceof Response) return role
   try {
-    const { name, color, permissions } = await req.json()
-    const role = await prisma.venueRole.update({ where: { id: roleId }, data: { name, color, permissions } })
-    return NextResponse.json(role)
+    const { name, color, permissions } = (await readJson(req)) as Record<string, unknown>
+    const perms = permissions === undefined ? undefined : parsePermissions(permissions)
+    if (perms === null) return jsonError(400, 'Invalid permissions')
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 60)) return jsonError(400, 'Invalid role name')
+    const updated = await prisma.venueRole.update({
+      where: { id: role.id },
+      data: {
+        ...(typeof name === 'string' && { name: name.trim() }),
+        ...(typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) && { color }),
+        ...(perms && { permissions: perms }),
+      },
+    })
+    return NextResponse.json(updated)
   } catch (err) {
-    console.error('[roles PATCH]', err)
-    return NextResponse.json({ error: 'Failed to update role' }, { status: 500 })
+    return handleError(err, 'roles PATCH')
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; roleId: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+// DELETE /api/venues/:id/roles/:roleId — delete a custom role (owner only). Its members are left with no access.
+export async function DELETE(_req: Request, { params }: Params) {
   const { id, roleId } = await params
-  const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
-  if (!venue) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
+  const role = await ownerAndRole(id, roleId)
+  if (role instanceof Response) return role
   try {
-    await prisma.venueRole.delete({ where: { id: roleId } })
+    await prisma.venueRole.delete({ where: { id: role.id } })
     return NextResponse.json({ success: true })
   } catch (err) {
-    console.error('[roles DELETE]', err)
-    return NextResponse.json({ error: 'Failed to delete role' }, { status: 500 })
+    return handleError(err, 'roles DELETE')
   }
 }

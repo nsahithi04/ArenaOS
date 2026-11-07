@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { toast } from 'sonner'
 import { usePermissions } from '@/hooks/use-permissions'
 import {
   User, Users, Bell, Camera, Save, Check, Plus, Trash2,
-  LogOut, KeyRound, Shield, Edit2, X,
+  LogOut, KeyRound, Shield, Edit2, X, Lock,
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -26,6 +27,9 @@ type Role = {
   name: string
   color: string
   permissions: RolePermissions
+  preset: 'MANAGER' | 'EMPLOYEE' | null
+  description: string | null
+  memberCount: number
 }
 
 type Member = {
@@ -33,9 +37,12 @@ type Member = {
   name: string
   email: string
   roleId: string | null
-  role: Role | null
-  initials: string
+  status: string
+  isYou: boolean
+  canManage: boolean
 }
+
+type TeamOwner = { id: string; name: string | null; email: string }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -78,22 +85,30 @@ function RolePermEditor({ perms, onChange }: { perms: RolePermissions; onChange:
   )
 }
 
+function PermChips({ perms }: { perms: RolePermissions }) {
+  const shown = MODULES.filter(({ key }) => perms[key] !== 'none')
+  if (!shown.length) return <span className="text-xs text-muted-foreground">No permissions</span>
+  return (
+    <>
+      {shown.map(({ key, label }) => (
+        <span key={key} className={`px-2 py-0.5 rounded-md text-xs font-medium border ${PERM_STYLES[perms[key]]}`}>
+          {label}: {PERM_LABELS[perms[key]]}
+        </span>
+      ))}
+    </>
+  )
+}
+
+function RoleBadge({ role }: { role: Role | undefined }) {
+  if (!role) return <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border border-border text-muted-foreground">No access</span>
+  return <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border" style={{ color: role.color, borderColor: role.color + '55', background: role.color + '10' }}>{role.name}</span>
+}
+
 const ROLE_COLORS = ['#16a34a', '#2563eb', '#7c3aed', '#dc2626', '#d97706', '#0891b2']
 
 const defaultPermissions = (): RolePermissions => ({
-  bookings: 'view', venue: 'none', reports: 'view', billing: 'none', team: 'none',
+  bookings: 'view', venue: 'none', reports: 'none', billing: 'none', team: 'none',
 })
-
-const ownerSections = [
-  { id: 'owner',         label: 'Owner Details',  icon: User   },
-  { id: 'team',          label: 'Team Members',   icon: Users  },
-  { id: 'roles',         label: 'Roles',          icon: Shield },
-  { id: 'notifications', label: 'Notifications',  icon: Bell   },
-]
-
-const staffSections = [
-  { id: 'owner', label: 'My Profile', icon: User },
-]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -118,14 +133,26 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
   )
 }
 
+async function readError(res: Response, fallback: string) {
+  try { return ((await res.json()) as { error?: string }).error ?? fallback } catch { return fallback }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function SettingsScreen() {
   const router = useRouter()
   const { data: session } = useSession()
-  const { isOwner } = usePermissions()
+  const { isOwner, canView, canEdit, loading: permsLoading } = usePermissions()
+  const canSeeTeam = canView('team')
+  const canEditTeam = canEdit('team')
 
   const [active, setActive] = useState('owner')
+
+  // Deep link, e.g. the top-bar bell opens /settings?tab=notifications
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab')
+    if (tab && ['owner', 'team', 'roles', 'notifications'].includes(tab)) setActive(tab)
+  }, [])
 
   // Owner
   const [ownerName,     setOwnerName]     = useState('')
@@ -137,12 +164,15 @@ export function SettingsScreen() {
   const avatarRef = useRef<HTMLInputElement>(null)
 
   // Team
+  const [teamOwner,   setTeamOwner]   = useState<TeamOwner | null>(null)
   const [members,     setMembers]     = useState<Member[]>([])
   const [showInvite,  setShowInvite]  = useState(false)
   const [inviteName,  setInviteName]  = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRoleId,setInviteRoleId]= useState<string | null>(null)
+  const [inviting,    setInviting]    = useState(false)
   const [memberError, setMemberError] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState<Member | null>(null)
 
   // Roles
   const [roles,        setRoles]        = useState<Role[]>([])
@@ -165,17 +195,43 @@ export function SettingsScreen() {
   const [saved,   setSaved]   = useState(false)
   const [creating, setCreating] = useState(false)
 
-  const sections = isOwner ? ownerSections : staffSections
+  const sections = [
+    { id: 'owner',         label: isOwner ? 'Owner Details' : 'My Profile', icon: User },
+    ...(canSeeTeam ? [
+      { id: 'team',  label: 'Team Members', icon: Users  },
+      { id: 'roles', label: 'Roles',        icon: Shield },
+    ] : []),
+    { id: 'notifications', label: 'Notifications', icon: Bell },
+  ]
 
   const displayName  = ownerName  || session?.user?.name  || ''
   const displayEmail = ownerEmail || session?.user?.email || ''
+  const roleById = (id: string | null) => roles.find((r) => r.id === id)
+  // Roles this user may hand out: owners any; managers only roles without team management.
+  const assignableRoles = roles.filter((r) => isOwner || r.permissions.team !== 'edit')
 
-  // Load profile + venue data once session is resolved
-  const { status: sessionStatus } = useSession()
+  const loadTeam = (vid: string) => {
+    fetch(`/api/venues/${vid}/roles`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rolesData: Role[]) => {
+        setRoles(rolesData)
+        setInviteRoleId((cur) => cur ?? rolesData.find((r) => r.preset === 'EMPLOYEE')?.id ?? null)
+      })
+      .catch(() => {})
+    fetch(`/api/venues/${vid}/members`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { owner: TeamOwner; members: Member[] } | null) => {
+        if (!data) return
+        setTeamOwner(data.owner)
+        setMembers(data.members)
+      })
+      .catch(() => {})
+  }
+
+  // Load profile + venue data once permissions are known
   useEffect(() => {
-    if (sessionStatus === 'loading') return
+    if (permsLoading) return
 
-    // Always load the user's own profile for personal fields
     fetch('/api/users/me')
       .then((r) => r.json())
       .then((u) => { if (!u.error && isOwner) setOwnerPhone(u.phone ?? '') })
@@ -188,33 +244,8 @@ export function SettingsScreen() {
         if (!v) return
         setVenueId(v.id)
         setFacilityName(v.name ?? '')
-
-        // For owners, phone comes from the venue record
-        if (isOwner) {
-          setOwnerPhone(v.phone ?? '')
-        }
-
-        // Load roles (always — staff see them read-only)
-        fetch(`/api/venues/${v.id}/roles`)
-          .then((r) => r.json())
-          .then((rolesData) => {
-            setRoles(rolesData.map((r: { id: string; name: string; color: string; permissions: RolePermissions }) => ({
-              id: r.id, name: r.name, color: r.color, permissions: r.permissions as RolePermissions,
-            })))
-          }).catch(() => {})
-
-        // Load members (owners only)
-        if (isOwner) {
-          fetch(`/api/venues/${v.id}/members`)
-            .then((r) => r.json())
-            .then((membersData) => {
-              setMembers(membersData.map((m: { id: string; name: string; email: string; roleId: string | null; role: Role | null }) => ({
-                id: m.id, name: m.name, email: m.email,
-                roleId: m.roleId, role: m.role,
-                initials: initials(m.name),
-              })))
-            }).catch(() => {})
-        }
+        if (isOwner) setOwnerPhone(v.phone ?? '')
+        if (canSeeTeam) loadTeam(v.id)
       })
       .catch(() => {})
 
@@ -230,7 +261,7 @@ export function SettingsScreen() {
         })
       })
       .catch(() => {})
-  }, [sessionStatus, isOwner])
+  }, [permsLoading, isOwner, canSeeTeam]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAvatarFile = async (file: File) => {
     setAvatarUploading(true)
@@ -271,25 +302,48 @@ export function SettingsScreen() {
   }
 
   const addMember = async () => {
-    if (!inviteName.trim() || !inviteEmail.trim() || !venueId) return
+    if (!inviteName.trim() || !inviteEmail.trim() || !venueId) { setMemberError('Name and email are required'); return }
+    if (!inviteRoleId) { setMemberError('Choose a role'); return }
     setMemberError('')
+    setInviting(true)
     try {
       const res = await fetch(`/api/venues/${venueId}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: inviteName.trim(), email: inviteEmail.trim(), roleId: inviteRoleId }),
       })
-      if (!res.ok) { setMemberError((await res.json()).error ?? 'Failed to add member'); return }
+      if (!res.ok) { setMemberError(await readError(res, 'Failed to add member')); return }
       const m = await res.json()
-      setMembers((prev) => [...prev, { id: m.id, name: m.name, email: m.email, roleId: m.roleId, role: m.role, initials: initials(m.name) }])
-      setInviteName(''); setInviteEmail(''); setInviteRoleId(null); setShowInvite(false)
+      setMembers((prev) => [...prev, { id: m.id, name: m.name, email: m.email, roleId: m.roleId, status: m.status, isYou: false, canManage: true }])
+      setRoles((prev) => prev.map((r) => r.id === m.roleId ? { ...r, memberCount: r.memberCount + 1 } : r))
+      toast.success(m.status === 'active' ? `${m.name} added to the team` : `Invite sent to ${m.email}`)
+      setInviteName(''); setInviteEmail(''); setShowInvite(false)
+      setInviteRoleId(roles.find((r) => r.preset === 'EMPLOYEE')?.id ?? null)
     } catch { setMemberError('Something went wrong') }
+    finally { setInviting(false) }
   }
 
-  const removeMember = async (memberId: string) => {
+  const changeMemberRole = async (member: Member, roleId: string) => {
+    if (!venueId || roleId === member.roleId) return
+    const res = await fetch(`/api/venues/${venueId}/members/${member.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roleId }),
+    })
+    if (!res.ok) { toast.error(await readError(res, 'Could not change role')); return }
+    setMembers((prev) => prev.map((m) => (m.id === member.id ? { ...m, roleId } : m)))
+    setRoles((prev) => prev.map((r) => ({ ...r, memberCount: r.memberCount + (r.id === roleId ? 1 : 0) - (r.id === member.roleId ? 1 : 0) })))
+    toast.success(`${member.name} is now ${roleById(roleId)?.name ?? 'updated'}`)
+  }
+
+  const removeMember = async (member: Member) => {
     if (!venueId) return
-    await fetch(`/api/venues/${venueId}/members/${memberId}`, { method: 'DELETE' })
-    setMembers((prev) => prev.filter((m) => m.id !== memberId))
+    const res = await fetch(`/api/venues/${venueId}/members/${member.id}`, { method: 'DELETE' })
+    setConfirmRemove(null)
+    if (!res.ok) { toast.error(await readError(res, 'Could not remove member')); return }
+    setMembers((prev) => prev.filter((m) => m.id !== member.id))
+    setRoles((prev) => prev.map((r) => (r.id === member.roleId ? { ...r, memberCount: r.memberCount - 1 } : r)))
+    toast.success(`${member.name} removed from the team`)
   }
 
   const createRole = async () => {
@@ -303,9 +357,9 @@ export function SettingsScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newRoleName.trim(), color: newRoleColor, permissions: newRolePerms }),
       })
-      if (!res.ok) { setRoleError((await res.json()).error ?? 'Failed to create role'); return }
+      if (!res.ok) { setRoleError(await readError(res, 'Failed to create role')); return }
       const r = await res.json()
-      setRoles((prev) => [...prev, { id: r.id, name: r.name, color: r.color, permissions: r.permissions as RolePermissions }])
+      setRoles((prev) => [...prev, { id: r.id, name: r.name, color: r.color, permissions: r.permissions, preset: null, description: null, memberCount: 0 }])
       setNewRoleName(''); setNewRolePerms(defaultPermissions()); setNewRoleColor(ROLE_COLORS[0]); setShowNewRole(false)
     } catch { setRoleError('Something went wrong') }
     finally { setCreating(false) }
@@ -313,25 +367,25 @@ export function SettingsScreen() {
 
   const saveEditingRole = async () => {
     if (!editingRole || !venueId) return
-    try {
-      const res = await fetch(`/api/venues/${venueId}/roles/${editingRole.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editingRole.name, color: editingRole.color, permissions: editingRole.permissions }),
-      })
-      if (!res.ok) return
-      const r = await res.json()
-      setRoles((prev) => prev.map((role) => role.id === r.id ? { ...role, name: r.name, color: r.color, permissions: r.permissions as RolePermissions } : role))
-      setEditingRole(null)
-    } catch { /* silent */ }
+    const res = await fetch(`/api/venues/${venueId}/roles/${editingRole.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editingRole.name, color: editingRole.color, permissions: editingRole.permissions }),
+    })
+    if (!res.ok) { toast.error(await readError(res, 'Could not save role')); return }
+    const r = await res.json()
+    setRoles((prev) => prev.map((role) => role.id === r.id ? { ...role, name: r.name, color: r.color, permissions: r.permissions } : role))
+    setEditingRole(null)
+    toast.success('Role saved')
   }
 
-  const deleteRole = async (id: string) => {
+  const deleteRole = async (role: Role) => {
     if (!venueId) return
-    const res = await fetch(`/api/venues/${venueId}/roles/${id}`, { method: 'DELETE' })
-    if (!res.ok) return
-    setRoles((prev) => prev.filter((r) => r.id !== id))
-    setMembers((prev) => prev.map((m) => m.roleId === id ? { ...m, roleId: null, role: null } : m))
+    if (role.memberCount > 0 && !window.confirm(`${role.memberCount} member(s) have the "${role.name}" role and will lose access until you give them another role. Delete it?`)) return
+    const res = await fetch(`/api/venues/${venueId}/roles/${role.id}`, { method: 'DELETE' })
+    if (!res.ok) { toast.error(await readError(res, 'Could not delete role')); return }
+    setRoles((prev) => prev.filter((r) => r.id !== role.id))
+    setMembers((prev) => prev.map((m) => m.roleId === role.id ? { ...m, roleId: null } : m))
   }
 
   const inp = 'w-full px-4 py-2.5 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary'
@@ -362,8 +416,8 @@ export function SettingsScreen() {
               <h2 className="text-lg font-semibold text-foreground">{sections.find((s) => s.id === active)?.label}</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
                 {active === 'owner'         && 'Your profile and account security'}
-                {active === 'team'          && 'Invite and manage team members'}
-                {active === 'roles'         && 'Create roles and set permissions'}
+                {active === 'team'          && (canEditTeam ? 'Invite managers and employees, and choose what they can access' : 'People who work at this venue')}
+                {active === 'roles'         && 'What each role can see and do'}
                 {active === 'notifications' && 'Choose which alerts you receive'}
               </p>
             </div>
@@ -482,48 +536,64 @@ export function SettingsScreen() {
           {active === 'team' && (
             <div className="space-y-3">
               {/* Owner row */}
-              <div className="bg-white rounded-xl border border-border p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-green-500/10 flex items-center justify-center text-sm font-semibold text-green-700">
-                    {initials(displayName) || <User size={14} />}
+              <div className="bg-white rounded-xl border border-border p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-green-500/10 flex items-center justify-center text-sm font-semibold text-green-700 flex-shrink-0">
+                    {initials(teamOwner?.name ?? displayName) || <User size={14} />}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">{displayName || 'You'} <span className="text-xs text-muted-foreground">(you)</span></p>
-                    <p className="text-xs text-muted-foreground">{displayEmail}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{teamOwner?.name ?? displayName} {isOwner && <span className="text-xs text-muted-foreground">(you)</span>}</p>
+                    <p className="text-xs text-muted-foreground truncate">{teamOwner?.email ?? displayEmail}</p>
                   </div>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-purple-50 text-purple-700 border-purple-200">Owner</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-purple-50 text-purple-700 border-purple-200 flex-shrink-0">Owner</span>
               </div>
 
               {members.map((m) => {
-                const role = roles.find((r) => r.id === m.roleId)
+                const role = roleById(m.roleId)
+                const editable = canEditTeam && m.canManage && !m.isYou
                 return (
-                  <div key={m.id} className="bg-white rounded-xl border border-border p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-blue-500/10 flex items-center justify-center text-sm font-semibold text-blue-700">{m.initials}</div>
-                      <div>
-                        <p className="text-sm font-medium">{m.name}</p>
-                        <p className="text-xs text-muted-foreground">{m.email}</p>
+                  <div key={m.id} className="bg-white rounded-xl border border-border p-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-full bg-blue-500/10 flex items-center justify-center text-sm font-semibold text-blue-700 flex-shrink-0">{initials(m.name)}</div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {m.name} {m.isYou && <span className="text-xs text-muted-foreground">(you)</span>}
+                          {m.status !== 'active' && <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Invited</span>}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">{m.email}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {role
-                        ? <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border" style={{ color: role.color, borderColor: role.color + '55', background: role.color + '10' }}>{role.name}</span>
-                        : <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border border-border text-muted-foreground">No role</span>}
-                      <button onClick={() => removeMember(m.id)}
-                        className="w-7 h-7 rounded-lg hover:bg-red-50 flex items-center justify-center text-muted-foreground hover:text-red-500 transition-colors">
-                        <Trash2 size={13} />
-                      </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {editable ? (
+                        <select value={m.roleId ?? ''} onChange={(e) => changeMemberRole(m, e.target.value)} aria-label={`Role for ${m.name}`}
+                          className="px-2 py-1 rounded-lg border border-border bg-white text-xs font-medium outline-none focus:ring-2 focus:ring-primary/20">
+                          {!m.roleId && <option value="">No access</option>}
+                          {assignableRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      ) : (
+                        <RoleBadge role={role} />
+                      )}
+                      {editable && (
+                        <button onClick={() => setConfirmRemove(m)} title="Remove from team"
+                          className="w-7 h-7 rounded-lg hover:bg-red-50 flex items-center justify-center text-muted-foreground hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 )
               })}
 
+              {members.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">No team members yet. Invite managers and employees to give them access.</p>
+              )}
+
               {/* Invite form */}
-              {showInvite ? (
-                <div className="bg-white rounded-xl border border-border p-5 space-y-3">
+              {canEditTeam && (showInvite ? (
+                <div className="bg-white rounded-xl border border-border p-5 space-y-4">
                   <p className="text-sm font-semibold">Invite Team Member</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-muted-foreground mb-1">Full Name</label>
                       <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Jane Smith" className={inp} />
@@ -534,33 +604,31 @@ export function SettingsScreen() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Role</label>
-                    {roles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No roles yet — <button onClick={() => { setShowInvite(false); setActive('roles') }} className="text-primary underline">create a role first</button></p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setInviteRoleId(null)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${inviteRoleId === null ? 'border-border bg-muted text-foreground' : 'border-border text-muted-foreground'}`}>
-                          No role
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">Role</label>
+                    <div className="space-y-2">
+                      {assignableRoles.map((r) => (
+                        <button key={r.id} type="button" onClick={() => setInviteRoleId(r.id)}
+                          className={`w-full text-left p-3 rounded-lg border transition-all ${inviteRoleId === r.id ? 'ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
+                          style={inviteRoleId === r.id ? { borderColor: r.color, background: r.color + '08' } : {}}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ background: r.color }} />
+                            <span className="text-sm font-medium">{r.name}</span>
+                            {r.preset && <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-in</span>}
+                          </div>
+                          {r.description && <p className="text-xs text-muted-foreground mt-1">{r.description}</p>}
                         </button>
-                        {roles.map((r) => (
-                          <button key={r.id} type="button" onClick={() => setInviteRoleId(r.id)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all`}
-                            style={inviteRoleId === r.id ? { color: r.color, borderColor: r.color, background: r.color + '10' } : {}}>
-                            {r.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                      ))}
+                    </div>
+                    {!isOwner && <p className="text-xs text-muted-foreground mt-2">Only the owner can add managers.</p>}
                   </div>
-                  {memberError && <p className="text-xs text-red-500 mt-1">{memberError}</p>}
+                  {memberError && <p className="text-xs text-red-500">{memberError}</p>}
                   <div className="flex gap-2 pt-1">
-                    <button onClick={addMember}
-                      className="flex-1 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-all"
+                    <button onClick={addMember} disabled={inviting}
+                      className="flex-1 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 disabled:opacity-60 transition-all"
                       style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}>
-                      Add Member
+                      {inviting ? 'Sending…' : 'Send Invite'}
                     </button>
-                    <button onClick={() => setShowInvite(false)}
+                    <button onClick={() => { setShowInvite(false); setMemberError('') }}
                       className="px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">
                       Cancel
                     </button>
@@ -571,6 +639,19 @@ export function SettingsScreen() {
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-sm font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-all bg-white">
                   <Plus size={15} /> Invite Team Member
                 </button>
+              ))}
+
+              {confirmRemove && (
+                <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={() => setConfirmRemove(null)}>
+                  <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+                    <h3 className="font-semibold text-foreground">Remove {confirmRemove.name}?</h3>
+                    <p className="text-sm text-muted-foreground mt-2">They lose access to this venue immediately. Their past bookings and payments stay on record.</p>
+                    <div className="flex justify-end gap-2 mt-5">
+                      <button onClick={() => setConfirmRemove(null)} className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted">Keep</button>
+                      <button onClick={() => removeMember(confirmRemove)} className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700">Remove</button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -584,17 +665,20 @@ export function SettingsScreen() {
                     <div className="flex items-center gap-2.5">
                       <div className="w-3 h-3 rounded-full" style={{ background: role.color }} />
                       <span className="text-sm font-semibold">{role.name}</span>
+                      {role.preset && (
+                        <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground"><Lock size={10} /> Built-in</span>
+                      )}
                       <span className="text-xs text-muted-foreground">
-                        {members.filter((m) => m.roleId === role.id).length} member{members.filter((m) => m.roleId === role.id).length !== 1 ? 's' : ''}
+                        {role.memberCount} member{role.memberCount !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    {isOwner && (
+                    {isOwner && !role.preset && (
                       <div className="flex items-center gap-2">
                         <button onClick={() => setEditingRole(editingRole?.id === role.id ? null : { ...role })}
                           className="w-7 h-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
                           <Edit2 size={13} />
                         </button>
-                        <button onClick={() => deleteRole(role.id)}
+                        <button onClick={() => deleteRole(role)}
                           className="w-7 h-7 rounded-lg hover:bg-red-50 flex items-center justify-center text-muted-foreground hover:text-red-500 transition-colors">
                           <Trash2 size={13} />
                         </button>
@@ -602,23 +686,16 @@ export function SettingsScreen() {
                     )}
                   </div>
 
+                  {role.description && <p className="px-5 -mt-2 pb-3 text-xs text-muted-foreground">{role.description}</p>}
+
                   {/* Permission summary chips */}
                   {editingRole?.id !== role.id && (
                     <div className="px-5 pb-4 flex flex-wrap gap-1.5">
-                      {MODULES.map(({ key, label }) => (
-                        role.permissions[key] !== 'none' && (
-                          <span key={key} className={`px-2 py-0.5 rounded-md text-xs font-medium border ${PERM_STYLES[role.permissions[key]]}`}>
-                            {label}: {PERM_LABELS[role.permissions[key]]}
-                          </span>
-                        )
-                      ))}
-                      {MODULES.every(({ key }) => role.permissions[key] === 'none') && (
-                        <span className="text-xs text-muted-foreground">No permissions</span>
-                      )}
+                      <PermChips perms={role.permissions} />
                     </div>
                   )}
 
-                  {/* Edit panel */}
+                  {/* Edit panel (custom roles only) */}
                   {editingRole?.id === role.id && (
                     <div className="px-5 pb-5 border-t border-border">
                       <div className="flex items-center gap-3 mt-4 mb-5">
@@ -650,13 +727,14 @@ export function SettingsScreen() {
                 </div>
               ))}
 
-              {/* Create role */}
-              {showNewRole ? (
+              {/* Create custom role (owner only) */}
+              {isOwner && (showNewRole ? (
                 <div className="bg-white rounded-xl border border-border p-5">
-                  <p className="text-sm font-semibold mb-3">New Role</p>
+                  <p className="text-sm font-semibold mb-1">New Custom Role</p>
+                  <p className="text-xs text-muted-foreground mb-3">Only needed if Manager and Employee don&apos;t fit, e.g. a coach who should only view bookings.</p>
                   <div className="flex items-center gap-3 mb-4">
                     <input value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)}
-                      placeholder="e.g. Front Desk, Coach, Manager"
+                      placeholder="e.g. Coach, Accountant"
                       className="flex-1 px-3 py-2 rounded-lg border border-border text-sm outline-none focus:ring-2 focus:ring-primary/20" />
                     <div className="flex gap-3">
                       {ROLE_COLORS.map((c) => (
@@ -680,12 +758,12 @@ export function SettingsScreen() {
                     </button>
                   </div>
                 </div>
-              ) : isOwner ? (
+              ) : (
                 <button onClick={() => setShowNewRole(true)}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-sm font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-all bg-white">
-                  <Plus size={15} /> Create Role
+                  <Plus size={15} /> Create Custom Role
                 </button>
-              ) : null}
+              ))}
             </div>
           )}
 

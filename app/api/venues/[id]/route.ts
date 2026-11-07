@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
+import { requireVenue } from '@/lib/booking/route-helpers'
 import { prisma } from '@/lib/db'
 import { isValidTimeZone } from '@/lib/booking/time'
 
@@ -10,12 +10,11 @@ const TYPE_MAP: Record<string, 'PRIVATE' | 'PUBLIC' | 'SEMI_PUBLIC'> = {
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   const { id } = await params
+  const ctx = await requireVenue(id, 'venue', 'view')
+  if (ctx instanceof Response) return ctx
   const venue = await prisma.venue.findFirst({
-    where: { id, ownerId: session.user.id },
+    where: { id },
     include: { images: true, sports: true, courts: true, operatingHours: true, pricingRules: true, amenities: true },
   })
   if (!venue) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -23,12 +22,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id } = await params
+  const ctx = await requireVenue(id, 'venue', 'edit')
+  if (ctx instanceof Response) return ctx
 
   try {
-    const { id } = await params
-    const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
+    const venue = await prisma.venue.findFirst({ where: { id } })
     if (!venue) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     const { name, description, phone, email, website, address, city, state, zip, country, type, logoUrl, coverUrl, galleryUrls, amenities, timezone, currency } = await req.json()

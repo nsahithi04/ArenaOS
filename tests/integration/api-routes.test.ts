@@ -107,11 +107,8 @@ describe.skipIf(!enabled)('booking API routes', () => {
     // Searching by phone must not work for viewers (would leak contact data)
     const byPhone = await (await bookings.GET(get(`/api/bookings?venueId=${A.venue.id}&q=0101`))).json()
     expect(byPhone.items).toHaveLength(0)
-    // No revenue on the dashboard without reports:view
-    const dash = await (await dashboard.GET(get(`/api/dashboard?venueId=${A.venue.id}&range=custom&from=${DATE}&to=${DATE}`))).json()
-    expect(dash.canSeeRevenue).toBe(false)
-    expect(dash.current.gross).toBeNull()
-    expect(dash.current.bookings).toBe(1)
+    // No dashboard at all without reports:view
+    expect((await dashboard.GET(get(`/api/dashboard?venueId=${A.venue.id}&range=custom&from=${DATE}&to=${DATE}`))).status).toBe(403)
 
     // bookings:edit → full booking access but no refunds without billing:edit
     as(editor.id)

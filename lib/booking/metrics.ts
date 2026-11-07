@@ -171,8 +171,14 @@ export function computeMetrics(opts: {
     openHours: r2(openMinutes / 60),
     trend: [...trend.values()].map((t) => ({ ...t, gross: r2(t.gross), collected: r2(t.collected) })),
     bySport: finish(bySport),
-    byCourt: finish(byCourt).map((c) => ({
+    // Every active court appears (even with no bookings) so occupancy can be explained per court.
+    byCourt: [
+      ...finish(byCourt),
+      ...activeCourts.filter((c) => !byCourt.has(c.id)).map((c) => ({ key: c.id, name: c.name, gross: 0, collected: 0, bookings: 0 })),
+    ].map((c) => ({
       ...c,
+      bookedHours: r2((bookedByCourt.get(c.key) ?? 0) / 60),
+      openHours: r2((openByCourt.get(c.key) ?? 0) / 60),
       occupancy: openByCourt.get(c.key) ? Math.min(1, (bookedByCourt.get(c.key) ?? 0) / openByCourt.get(c.key)!) : null,
     })),
     bySource: finish(bySource),

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/auth'
+import { requireVenue } from '@/lib/booking/route-helpers'
 import { prisma } from '@/lib/db'
 
 type CourtPayload = { id?: string; name: string; type: string; capacity: number; description: string; sportId: string; images?: string[] }
@@ -11,13 +11,11 @@ type CourtPayload = { id?: string; name: string; type: string; capacity: number;
 // Courts removed in the UI are hard-deleted only when nothing references them;
 // otherwise they are deactivated (isActive = false) and disappear from booking screens.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id } = await params
+  const ctx = await requireVenue(id, 'venue', 'edit')
+  if (ctx instanceof Response) return ctx
 
   try {
-    const { id } = await params
-    const venue = await prisma.venue.findFirst({ where: { id, ownerId: session.user.id } })
-    if (!venue) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     const { courts } = (await req.json()) as { courts: CourtPayload[] }
     if (!Array.isArray(courts)) return NextResponse.json({ error: 'courts must be an array' }, { status: 400 })

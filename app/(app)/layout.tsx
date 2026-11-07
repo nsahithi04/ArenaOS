@@ -38,6 +38,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [venueName, setVenueName] = useState("Your Venue");
+  const [topSearch, setTopSearch] = useState("");
   const pathname = usePathname();
   const router = useRouter();
 
@@ -56,7 +57,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const { data: session, status } = useSession();
-  const { canView, isOwner } = usePermissions();
+  const { canView } = usePermissions();
   const sessionLoading = status === "loading";
   const venueActive = pathname.startsWith("/venue");
   const settingsActive = pathname.startsWith("/settings");
@@ -105,9 +106,9 @@ function AppShell({ children }: { children: React.ReactNode }) {
               ))
             : navItems
             .filter((item) => {
-              if (["/dashboard", "/calendar", "/bookings"].includes(item.href)) {
-                return canView("bookings");
-              }
+              // Dashboard (revenue/stats) is for owners and managers; calendar and bookings for anyone with bookings access.
+              if (item.href === "/dashboard") return canView("reports");
+              if (["/calendar", "/bookings"].includes(item.href)) return canView("bookings");
               return true;
             })
             .map((item) => {
@@ -144,8 +145,8 @@ function AppShell({ children }: { children: React.ReactNode }) {
               <div className="h-9 rounded-lg bg-white/5 animate-pulse mx-1" />
             </>
           )}
-          {/* Venue Settings — owners only */}
-          {!sessionLoading && canView("venue") && isOwner && (
+          {/* Venue Settings — owners and managers (venue permission) */}
+          {!sessionLoading && canView("venue") && (
             <button
               onClick={() => router.push("/venue")}
               title={collapsed ? venueName : undefined}
@@ -198,20 +199,38 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar */}
         <header className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3.5 bg-white border-b border-border flex-shrink-0">
-          <div className="relative">
+          {/* Global booking search: Enter opens Bookings filtered by the query */}
+          <form
+            role="search"
+            className={`relative ${canView("bookings") ? "" : "invisible"}`}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = topSearch.trim();
+              router.push(q ? `/bookings?q=${encodeURIComponent(q)}` : "/bookings");
+            }}
+          >
             <Search
               size={16}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
             <input
-              placeholder="Search bookings, courts..."
+              value={topSearch}
+              onChange={(e) => setTopSearch(e.target.value)}
+              placeholder="Search bookings…"
+              aria-label="Search bookings by customer, phone or booking ID"
+              maxLength={100}
               className="pl-9 pr-4 py-2 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-primary/20 w-36 sm:w-64 placeholder:text-muted-foreground"
             />
-          </div>
+          </form>
           <div className="flex items-center gap-3">
-            <button className="relative w-9 h-9 rounded-lg hover:bg-muted transition-colors flex items-center justify-center">
+            {/* No in-app notification feed yet: the bell opens notification preferences (no fake unread dot). */}
+            <button
+              onClick={() => router.push("/settings?tab=notifications")}
+              title="Notification preferences"
+              aria-label="Notification preferences"
+              className="relative w-9 h-9 rounded-lg hover:bg-muted transition-colors flex items-center justify-center"
+            >
               <Bell size={18} className="text-muted-foreground" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
             </button>
             <button
               onClick={() => router.push('/settings')}

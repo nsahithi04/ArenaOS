@@ -6,8 +6,9 @@
 // Refuses to run against a non-local database (e.g. Neon production).
 //
 // Demo logins (test-only credentials, local database only):
-//   owner:  demo-owner@gameon.test / DemoOwner!2026
-//   staff:  demo-staff@gameon.test / DemoStaff!2026   (bookings: view only)
+//   owner:    demo-owner@gameon.test   / DemoOwner!2026     (full access)
+//   manager:  demo-manager@gameon.test / DemoManager!2026   (Manager role)
+//   employee: demo-staff@gameon.test   / DemoStaff!2026     (Employee role)
 //
 // Usage: pnpm demo:seed
 
@@ -40,7 +41,7 @@ async function main() {
   if (db === 'gameon_test') throw new Error('Refusing: gameon_test is reserved for automated tests (it is wiped on every run)')
 
   // Remove only the previous demo data (if any).
-  const DEMO_EMAILS = ['demo-owner@gameon.test', 'demo-staff@gameon.test']
+  const DEMO_EMAILS = ['demo-owner@gameon.test', 'demo-manager@gameon.test', 'demo-staff@gameon.test']
   const oldUsers = await prisma.user.findMany({ where: { email: { in: DEMO_EMAILS } }, select: { id: true } })
   const oldVenues = await prisma.venue.findMany({ where: { OR: [{ ownerId: { in: oldUsers.map((x) => x.id) } }, { slug: 'demo-sports-club' }] }, select: { id: true } })
   const venueIds = oldVenues.map((v) => v.id)
@@ -74,11 +75,16 @@ async function main() {
       ],
     })
   }
-  const staff = await prisma.user.create({
-    data: { email: 'demo-staff@gameon.test', name: 'Demo Staff', role: 'STAFF', emailVerified: new Date(), password: await bcrypt.hash('DemoStaff!2026', 10) },
-  })
-  const role = await prisma.venueRole.create({ data: { venueId: venue.id, name: 'Front desk (view)', permissions: { bookings: 'view', venue: 'none', reports: 'none', billing: 'none', team: 'none' } } })
-  await prisma.venueMember.create({ data: { venueId: venue.id, userId: staff.id, roleId: role.id, email: staff.email, name: staff.name, status: 'active' } })
+  // Built-in roles (must match lib/team/presets.ts)
+  const managerRole = await prisma.venueRole.create({ data: { venueId: venue.id, preset: 'MANAGER', name: 'Manager', color: '#7c3aed', permissions: { bookings: 'edit', venue: 'edit', reports: 'view', billing: 'edit', team: 'edit' } } })
+  const employeeRole = await prisma.venueRole.create({ data: { venueId: venue.id, preset: 'EMPLOYEE', name: 'Employee', color: '#2563eb', permissions: { bookings: 'edit', venue: 'none', reports: 'none', billing: 'none', team: 'none' } } })
+  for (const [email, name, pw, role] of [
+    ['demo-manager@gameon.test', 'Demo Manager', 'DemoManager!2026', managerRole],
+    ['demo-staff@gameon.test', 'Demo Employee', 'DemoStaff!2026', employeeRole],
+  ]) {
+    const user = await prisma.user.create({ data: { email, name, role: 'STAFF', emailVerified: new Date(), password: await bcrypt.hash(pw, 10) } })
+    await prisma.venueMember.create({ data: { venueId: venue.id, userId: user.id, roleId: role.id, email, name, status: 'active' } })
+  }
 
   // A handful of bookings around today, non-overlapping per court.
   const plan = [

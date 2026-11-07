@@ -7,6 +7,8 @@ declare module 'next-auth' {
       id: string
       role: string
       venueId: string | null
+      /** True only if this user owns the venue (computed from Venue.ownerId, not the account type). */
+      isOwner: boolean
       venuePermissions: VenuePermissions
     } & DefaultSession['user']
   }
@@ -17,6 +19,7 @@ declare module 'next-auth/jwt' {
     id?: string
     role?: string
     venueId?: string | null
+    isOwner?: boolean
     venuePermissions?: VenuePermissions
     permissionsRefreshedAt?: number
   }

@@ -162,9 +162,17 @@ model Venue {
 
 // ─── Venue Roles & Members ────────────────────────────────────────────────────
 
+enum VenueRolePreset {
+  MANAGER
+  EMPLOYEE
+}
+
 model VenueRole {
   id          String   @id @default(cuid())
   venueId     String
+  // Built-in roles every venue gets. Their permissions are fixed in code
+  // (lib/team/presets.ts) and they cannot be renamed or deleted.
+  preset      VenueRolePreset?
   name        String
   color       String   @default("#16a34a")
   // permissions stored as JSON: { bookings, venue, reports, billing, team }
@@ -174,6 +182,8 @@ model VenueRole {
 
   venue   Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
   members VenueMember[]
+
+  @@unique([venueId, preset])
 }
 
 model VenueMember {

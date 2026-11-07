@@ -6,7 +6,8 @@ import { computeMetrics, type MetricBooking, type MetricPayment } from '@/lib/bo
 import { bookingSelect, toBookingDTO } from '@/lib/booking/queries'
 import { handleError, jsonError, requireVenue } from '@/lib/booking/route-helpers'
 import { loadVenueConfig } from '@/lib/booking/service'
-import { addDays, diffDays, endOfMonth, isLocalDate, localRangeToUtc, startOfMonth, startOfWeek, todayIn } from '@/lib/booking/time'
+import { addDays, diffDays, localRangeToUtc, todayIn } from '@/lib/booking/time'
+import { resolveRange } from '@/lib/booking/ranges'
 
 async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<ReturnType<typeof loadVenueConfig>>, from: string, to: string) {
   const { start, end } = localRangeToUtc(from, to, cfg.timezone)
@@ -48,29 +49,19 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
 }
 
 // GET /api/dashboard?venueId&range=today|week|month|custom&from&to
+// Owners and managers only (reports:view). Employees don't see the dashboard.
 export async function GET(req: Request) {
   const sp = new URL(req.url).searchParams
-  const ctx = await requireVenue(sp.get('venueId'), 'bookings', 'view')
+  const ctx = await requireVenue(sp.get('venueId'), 'reports', 'view')
   if (ctx instanceof Response) return ctx
 
   try {
     const venueId = ctx.access.venueId
     const cfg = await loadVenueConfig(prisma, venueId)
     const today = todayIn(cfg.timezone)
-    const range = sp.get('range') ?? 'week'
-
-    let from: string
-    let to: string
-    if (range === 'today') [from, to] = [today, today]
-    else if (range === 'month') [from, to] = [startOfMonth(today), endOfMonth(today)]
-    else if (range === 'custom') {
-      const f = sp.get('from')
-      const t = sp.get('to')
-      if (!isLocalDate(f) || !isLocalDate(t)) return jsonError(400, 'Custom range needs from and to (YYYY-MM-DD)')
-      if (diffDays(f, t) < 0) return jsonError(400, '"from" must be on or before "to"')
-      if (diffDays(f, t) > 366) return jsonError(400, 'Custom range can be at most one year')
-      ;[from, to] = [f, t]
-    } else [from, to] = [startOfWeek(today), addDays(startOfWeek(today), 6)]
+    const r = resolveRange(sp, today)
+    if (!r.ok) return jsonError(400, r.error)
+    const { key: range, from, to } = r
 
     const len = diffDays(from, to) + 1
     const prevTo = addDays(from, -1)
@@ -96,7 +87,7 @@ export async function GET(req: Request) {
     ])
     const t = todayMetrics ?? current
 
-    // Revenue figures require reports:view. Counts and occupancy only need bookings:view.
+    // Kept for custom roles that grant reports:view; always true for owners/managers.
     const canSeeRevenue = hasPermission(ctx.access, 'reports', 'view')
     const strip = <T extends Record<string, unknown>>(m: T) => (canSeeRevenue ? m : redactRevenue(m))
 

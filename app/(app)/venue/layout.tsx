@@ -1,6 +1,8 @@
 'use client'
 
+import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { usePermissions } from '@/hooks/use-permissions'
 import { Building2, Dumbbell, LayoutGrid, DollarSign, Clock } from 'lucide-react'
 
 const sections = [
@@ -14,6 +16,14 @@ const sections = [
 export default function VenueLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { canView, loading } = usePermissions()
+  const allowed = canView('venue')
+
+  useEffect(() => {
+    if (!loading && !allowed) router.replace('/calendar')
+  }, [loading, allowed, router])
+
+  if (loading || !allowed) return null
 
   return (
     <div className="flex h-full">

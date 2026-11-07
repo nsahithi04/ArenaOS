@@ -48,6 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (token.id && now - lastRefresh > PERMISSIONS_TTL) {
         const userId = token.id as string
         const ownedVenue = await prisma.venue.findFirst({ where: { ownerId: userId } })
+        token.isOwner = !!ownedVenue
         if (ownedVenue) {
           token.venueId          = ownedVenue.id
           token.venuePermissions = OWNER_PERMISSIONS
@@ -78,6 +79,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.id               = (token.id   ?? '') as string
       session.user.role             = (token.role ?? 'PLAYER') as string
       session.user.venueId          = (token.venueId ?? null) as string | null
+      session.user.isOwner          = token.isOwner === true
       session.user.venuePermissions = (token.venuePermissions ?? NO_PERMISSIONS) as VenuePermissions
       return session
     },
