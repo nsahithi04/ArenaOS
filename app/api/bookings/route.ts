@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hasPermission } from '@/lib/booking/access'
+import { hasPermission, lockActorOf } from '@/lib/booking/access'
 import { buildWhere, findBookings, parseFilters, toBookingDTO } from '@/lib/booking/queries'
 import { handleError, readJson, requireVenue } from '@/lib/booking/route-helpers'
 import { createBooking } from '@/lib/booking/service'
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const ctx = await requireVenue(input.venueId, 'bookings', 'edit')
     if (ctx instanceof Response) return ctx
 
-    const result = await createBooking(prisma, ctx.access.venueId, ctx.userId, input)
+    const result = await createBooking(prisma, ctx.access.venueId, ctx.userId, input, lockActorOf(ctx.access))
     return NextResponse.json({ id: result.id }, { status: 201 })
   } catch (err) {
     return handleError(err, 'bookings POST')

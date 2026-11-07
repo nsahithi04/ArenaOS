@@ -36,3 +36,8 @@ export async function defaultVenueId(db: Db, userId: string): Promise<string | n
 export function hasPermission(access: VenueAccess, module: keyof VenuePermissions, level: 'view' | 'edit'): boolean {
   return access.isOwner || can(access.permissions, module, level)
 }
+
+/** Who may change past bookings: owners always; billing:edit holders (managers) within the correction window. */
+export function lockActorOf(access: VenueAccess) {
+  return { isOwner: access.isOwner, canCorrect: hasPermission(access, 'billing', 'edit') }
+}

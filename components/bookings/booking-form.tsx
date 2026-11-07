@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, Clock } from 'lucide-react'
 import {
   api, ApiError, BRAND_GRADIENT, inputCls, METHODS, Modal, money, SOURCES, Spinner, hhmm, parseHHmm, fmtDuration, fmtTime,
-  nowMinutesIn,
+  nowMinutesIn, earliestEditableDate,
   type Booking, type BookingContext, type BookingSource, type PaymentMethod,
 } from './shared'
 
@@ -270,7 +270,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
           </div>
           <div>
             {label('Date', true)}
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+            <input type="date" value={date} min={earliestEditableDate(ctx)} onChange={(e) => setDate(e.target.value)} className={inputCls} />
             {err('date')}
           </div>
           <div className="grid grid-cols-2 gap-2">

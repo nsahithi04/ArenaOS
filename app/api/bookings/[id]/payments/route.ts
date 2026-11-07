@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hasPermission } from '@/lib/booking/access'
+import { hasPermission, lockActorOf } from '@/lib/booking/access'
 import { requireBookingAccess } from '@/lib/booking/booking-lookup'
 import { handleError, jsonError, readJson } from '@/lib/booking/route-helpers'
 import { recordPayment } from '@/lib/booking/service'
@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (input.kind === 'REFUND' && !hasPermission(ctx.access, 'billing', 'edit')) {
       return jsonError(403, "You don't have permission to issue refunds")
     }
-    const result = await recordPayment(prisma, ctx.access.venueId, ctx.userId, id, input)
+    const result = await recordPayment(prisma, ctx.access.venueId, ctx.userId, id, input, lockActorOf(ctx.access))
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
     return handleError(err, 'booking payments POST')

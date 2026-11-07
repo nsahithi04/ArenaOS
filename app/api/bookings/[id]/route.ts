@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hasPermission } from '@/lib/booking/access'
+import { hasPermission, lockActorOf } from '@/lib/booking/access'
 import { requireBookingAccess } from '@/lib/booking/booking-lookup'
 import { bookingSelect, toBookingDTO } from '@/lib/booking/queries'
 import { handleError, jsonError, readJson } from '@/lib/booking/route-helpers'
@@ -60,7 +60,7 @@ export async function PATCH(req: Request, { params }: Params) {
   if (ctx instanceof Response) return ctx
   try {
     const input = validateUpdateBooking(await readJson(req))
-    await updateBooking(prisma, ctx.access.venueId, ctx.userId, id, input)
+    await updateBooking(prisma, ctx.access.venueId, ctx.userId, id, input, lockActorOf(ctx.access))
     return NextResponse.json(await detail(id, true))
   } catch (err) {
     return handleError(err, 'booking PATCH')

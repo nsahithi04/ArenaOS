@@ -19,6 +19,8 @@ import * as dashboard from '@/app/api/dashboard/route'
 import * as bookings from '@/app/api/bookings/route'
 import * as payments from '@/app/api/bookings/[id]/payments/route'
 import { ensurePresetRoles } from '@/lib/team/presets'
+import * as bookingById from '@/app/api/bookings/[id]/route'
+import { addDays, todayIn, zonedToUtc } from '@/lib/booking/time'
 import { DATE, prisma, resetDatabase, seedVenue } from './fixtures'
 
 const enabled = !!process.env.TEST_DB_AVAILABLE
@@ -182,6 +184,55 @@ describe.skipIf(!enabled)('owner / manager / employee', () => {
     expect((await role.DELETE(req('DELETE', '/x'), pr(A.venue.id, coachRole.id))).status).toBe(200)
     as(coach.id)
     expect((await bookings.GET(req('GET', `/api/bookings?venueId=${A.venue.id}`))).status).toBe(403)
+  })
+
+  it('past bookings lock by age: employees today+, managers 7 days, owner always', async () => {
+    const tz = A.venue.timezone
+    const today = todayIn(tz)
+    // Insert bookings directly (bypassing the rules under test) at various ages.
+    const mk = async (date: string, hour: number, paid = 0) => {
+      const b = await prisma.booking.create({
+        data: { venueId: A.venue.id, courtId: A.court2.id, customer: `Age ${date}`, source: 'PHONE', status: 'CONFIRMED',
+          startTime: zonedToUtc(date, hour * 60, tz), endTime: zonedToUtc(date, hour * 60 + 60, tz), amountUsd: 20, payment: paid ? 'PAID' : 'PENDING' },
+      })
+      if (paid) await prisma.payment.create({ data: { bookingId: b.id, venueId: A.venue.id, method: 'CASH', amount: paid } })
+      return b.id
+    }
+    const todayId = await mk(today, 6)
+    const recentId = await mk(addDays(today, -3), 6, 20) // 3 days ago, paid
+    const oldId = await mk(addDays(today, -30), 6, 20) // 30 days ago, paid
+    const owedOldId = await mk(addDays(today, -30), 8) // 30 days ago, unpaid
+    const patch = (id: string, body: unknown) => bookingById.PATCH(req('PATCH', '/x', body), p1(id))
+    const pay = (id: string, body: unknown) => payments.POST(req('POST', '/x', body), p1(id))
+    const create = (date: string, hour: string) => bookings.POST(req('POST', '/api/bookings', { venueId: A.venue.id, courtId: A.court1.id, customer: 'Backfill', source: 'WALK_IN', date, start: hour, end: `${String(Number(hour.slice(0, 2)) + 1).padStart(2, '0')}:00`, amount: 20, overrideHours: true }))
+
+    // Employee: nothing before today, but can collect money owed and check in today
+    as(employee.id)
+    const empCancel = await patch(recentId, { status: 'CANCELLED' })
+    expect(empCancel.status).toBe(403)
+    expect((await empCancel.json()).code).toBe('BOOKING_LOCKED')
+    expect((await patch(todayId, { date: addDays(today, -1), start: '06:00', end: '07:00' })).status).toBe(403) // can't move into the past
+    expect((await create(addDays(today, -1), '06:00')).status).toBe(403)
+    expect((await pay(owedOldId, { method: 'CASH', amount: 20 })).status).toBe(201)
+    expect((await patch(todayId, { status: 'CHECKED_IN' })).status).toBe(200)
+
+    // Manager: 7-day window
+    as(manager.id)
+    expect((await pay(recentId, { kind: 'REFUND', method: 'CASH', amount: 5 })).status).toBe(201)
+    expect((await patch(recentId, { status: 'CANCELLED' })).status).toBe(200)
+    expect((await patch(oldId, { status: 'CANCELLED' })).status).toBe(403)
+    expect((await pay(oldId, { kind: 'REFUND', method: 'CASH', amount: 5 })).status).toBe(403)
+    expect((await create(addDays(today, -3), '07:00')).status).toBe(201)
+    expect((await create(addDays(today, -10), '07:00')).status).toBe(403)
+
+    // Owner: anything — except checking in on a day that isn't today
+    as(A.owner.id)
+    expect((await pay(oldId, { kind: 'REFUND', method: 'CASH', amount: 5 })).status).toBe(201)
+    expect((await patch(oldId, { status: 'CANCELLED', cancelReason: 'Owner correction' })).status).toBe(200)
+    const lateCheckIn = await patch(owedOldId, { status: 'CHECKED_IN' })
+    expect(lateCheckIn.status).toBe(422)
+    expect((await lateCheckIn.json()).code).toBe('CHECKIN_NOT_TODAY')
+    expect((await patch(owedOldId, { status: 'COMPLETED' })).status).toBe(200)
   })
 
   it('saving sports keeps operating hours and court links', async () => {

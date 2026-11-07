@@ -12,7 +12,8 @@ import { Prisma, type PrismaClient } from '@prisma/client'
 import { checkOperatingHours, type HoursRow } from './availability'
 import { ConflictError, isExclusionViolation, ServiceError } from './errors'
 import { quotePrice, type PriceQuote, type PricingRuleInput } from './pricing'
-import { formatMinutes, localDateOf, localMinutesOf, zonedToUtc } from './time'
+import { formatMinutes, localDateOf, localMinutesOf, todayIn, zonedToUtc } from './time'
+import { canChangeBookingOn, canCheckInOn, lockMessage, MANAGER_CORRECTION_DAYS, type LockActor } from './locks'
 import {
   derivePaymentStatus,
   type BlockInput,
@@ -160,8 +161,13 @@ function wrapConflict(err: unknown): never {
 
 // ─── Create ─────────────────────────────────────────────────────────────────
 
-export async function createBooking(db: PrismaClient, venueId: string, actorId: string, input: CreateBookingInput) {
+export async function createBooking(db: PrismaClient, venueId: string, actorId: string, input: CreateBookingInput, actor: LockActor) {
   const cfg = await loadVenueConfig(db, venueId)
+  if (!canChangeBookingOn(actor, input.date, todayIn(cfg.timezone))) {
+    throw new ServiceError(403, 'BOOKING_LOCKED', actor.canCorrect
+      ? `Bookings more than ${MANAGER_CORRECTION_DAYS} days in the past can only be added by the owner.`
+      : "Bookings can't be added for past dates. Ask a manager or the owner.")
+  }
   const court = courtFor(cfg, input.courtId)
   const sportId = input.sportId ?? court.sportId
   const sport = sportFor(cfg, sportId)
@@ -234,7 +240,7 @@ export function canTransition(from: BookingStatusValue, to: BookingStatusValue):
   return from === to || TRANSITIONS[from].includes(to)
 }
 
-export async function updateBooking(db: PrismaClient, venueId: string, actorId: string, bookingId: string, input: UpdateBookingInput) {
+export async function updateBooking(db: PrismaClient, venueId: string, actorId: string, bookingId: string, input: UpdateBookingInput, actor: LockActor) {
   const existing = await db.booking.findFirst({ where: { id: bookingId, venueId } })
   if (!existing) throw new ServiceError(404, 'NOT_FOUND', 'Booking not found')
   const cfg = await loadVenueConfig(db, venueId)
@@ -256,6 +262,16 @@ export async function updateBooking(db: PrismaClient, venueId: string, actorId: 
     (input.window !== undefined && (input.window.date !== curDate || input.window.startMin !== curStart || input.window.endMin !== curEnd))
   const reinstating = fromStatus === 'CANCELLED' && toStatus !== 'CANCELLED'
   const sportChanged = input.sportId !== undefined && input.sportId !== existing.sportId
+
+  // Past bookings are locked by age (see lib/booking/locks.ts); moving a booking into a locked date is blocked too.
+  const today = todayIn(tz)
+  if (!canChangeBookingOn(actor, curDate, today)) throw new ServiceError(403, 'BOOKING_LOCKED', lockMessage(actor))
+  if (input.window && !canChangeBookingOn(actor, input.window.date, today)) {
+    throw new ServiceError(403, 'BOOKING_LOCKED', "You can't move a booking to that past date.")
+  }
+  if (toStatus === 'CHECKED_IN' && fromStatus !== 'CHECKED_IN' && !canCheckInOn(input.window?.date ?? curDate, today)) {
+    throw new ServiceError(422, 'CHECKIN_NOT_TODAY', 'Check-in is only possible on the day of the booking.')
+  }
 
   if (scheduleChanged && (toStatus === 'CANCELLED' || toStatus === 'COMPLETED')) {
     throw new ServiceError(422, 'NOT_RESCHEDULABLE', `A ${toStatus.toLowerCase()} booking cannot be rescheduled.`)
@@ -324,13 +340,24 @@ export async function updateBooking(db: PrismaClient, venueId: string, actorId: 
 
 // ─── Payments ───────────────────────────────────────────────────────────────
 
-export async function recordPayment(db: PrismaClient, venueId: string, actorId: string, bookingId: string, input: PaymentInput) {
+export async function recordPayment(db: PrismaClient, venueId: string, actorId: string, bookingId: string, input: PaymentInput, actor: LockActor) {
   return db.$transaction(async (tx) => {
     // Lock the booking row so concurrent payments can't both pass the balance check.
     const rows = await tx.$queryRaw<{ id: string; amountUsd: Prisma.Decimal; status: string }[]>`
       SELECT id, "amountUsd", status::text AS status FROM "Booking" WHERE id = ${bookingId} AND "venueId" = ${venueId} FOR UPDATE`
     const b = rows[0]
     if (!b) throw new ServiceError(404, 'NOT_FOUND', 'Booking not found')
+
+    // Refunds rewrite history, so they follow the booking locks. Collecting money owed is always allowed.
+    if (input.kind === 'REFUND') {
+      const info = await tx.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { startTime: true, venue: { select: { timezone: true } } } })
+      const tz = info.venue.timezone
+      if (!canChangeBookingOn(actor, localDateOf(info.startTime, tz), todayIn(tz))) {
+        throw new ServiceError(403, 'BOOKING_LOCKED', actor.canCorrect
+          ? `Refunds on bookings older than ${MANAGER_CORRECTION_DAYS} days can only be issued by the owner.`
+          : lockMessage(actor))
+      }
+    }
 
     const sums = await tx.payment.groupBy({ by: ['kind'], where: { bookingId }, _sum: { amount: true } })
     const paid = Number(sums.find((s) => s.kind === 'PAYMENT')?._sum.amount ?? 0)

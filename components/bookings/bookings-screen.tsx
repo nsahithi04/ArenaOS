@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Search, Calendar, XCircle, RefreshCw, UserCheck, Filter, Download, X } from "lucide-react";
 import {
   addDays, api, ApiError, BRAND_GRADIENT, ConfirmDialog, ErrorState, fmtDate, fmtTime, inputCls, money, PaymentBadge, SOURCES,
-  sourceLabel, Spinner, StatusBadge, STATUS, useBookingContext, weekStart,
+  sourceLabel, Spinner, StatusBadge, STATUS, useBookingContext, weekStart, bookingLockReason, canCheckInToday,
   type Booking, type BookingStatus,
 } from "@/components/bookings/shared";
 import { BookingForm, type BookingFormMode } from "@/components/bookings/booking-form";
@@ -284,10 +284,12 @@ export function BookingsScreen() {
                     <td className="px-4 py-3.5"><PaymentBadge payment={b.payment} paid={b.paid} balance={b.balance} /></td>
                     <td className="px-4 py-3.5"><StatusBadge status={b.status} /></td>
                     <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      {canEdit && (
+                      {canEdit && bookingLockReason(ctx, b.date) ? (
+                        <span className="text-xs text-muted-foreground" title={bookingLockReason(ctx, b.date) ?? ''}>Locked</span>
+                      ) : canEdit && (
                         <div className="flex items-center gap-1">
                           {rowBusy === b.id && <Spinner className="text-muted-foreground" />}
-                          {(b.status === "CONFIRMED" || b.status === "PENDING") && (
+                          {(b.status === "CONFIRMED" || b.status === "PENDING") && canCheckInToday(ctx, b.date) && (
                             <button onClick={() => quickStatus(b, "CHECKED_IN", {}, `${b.customer} checked in`)} disabled={rowBusy === b.id} className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-green-600 hover:bg-green-50 transition-colors">
                               <UserCheck size={12} /> Check In
                             </button>

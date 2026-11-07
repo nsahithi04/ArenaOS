@@ -29,6 +29,9 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
   | Venue settings (facility, sports, courts, hours, pricing) | ✓ | ✓ | – |
   | Invite and remove employees | ✓ | ✓ | – |
   | Add or remove managers, create custom roles | ✓ | – | – |
+  | Change past bookings (cancel, reschedule, edit, refund) | Any date | Up to 7 days back | Today onwards only |
+
+  Check-in is only possible on the day of the booking. Recording a payment that's still owed is allowed on any booking.
 
   Manager and Employee are built-in roles on every venue. Owners can also create custom roles with `none`, `view` or `edit` on bookings, venue, reports, billing and team.
 

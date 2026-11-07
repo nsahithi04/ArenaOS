@@ -5,10 +5,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarClock, CheckCircle2, Pencil, RotateCcw, UserCheck, Wallet, XCircle } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Lock, Pencil, RotateCcw, UserCheck, Wallet, XCircle } from 'lucide-react'
 import {
   api, ApiError, BRAND_GRADIENT, ConfirmDialog, ErrorState, fmtDate, fmtDuration, fmtTime, inputCls, METHODS, methodLabel, Modal, money,
-  PaymentBadge, sourceLabel, Spinner, StatusBadge,
+  PaymentBadge, sourceLabel, Spinner, StatusBadge, bookingLockReason, canCheckInToday,
   type BookingContext, type BookingDetail, type BookingStatus, type PaymentMethod,
 } from './shared'
 import { BookingForm, type BookingFormMode } from './booking-form'
@@ -65,6 +65,9 @@ export function BookingDetails({ ctx, bookingId, onClose, onChanged }: {
 
   const net = b ? b.paid - b.refunded : 0
   const active = b && b.status !== 'CANCELLED'
+  const lockReason = b ? bookingLockReason(ctx, b.date) : null
+  const editable = canEdit && !lockReason
+  const checkInToday = b ? canCheckInToday(ctx, b.date) : false
 
   return (
     <>
@@ -74,21 +77,23 @@ export function BookingDetails({ ctx, bookingId, onClose, onChanged }: {
         onClose={onClose}
         width="max-w-md"
         footer={
-          b && canEdit ? (
+          b && canEdit && (editable || (active && b.balance > 0)) ? (
             <div className="flex flex-wrap gap-2">
-              {(b.status === 'CONFIRMED' || b.status === 'PENDING') && (
+              {/* Locked bookings only allow collecting money that's still owed */}
+              {!editable && active && b.balance > 0 && <ActionBtn icon={Wallet} onClick={() => setPayKind('PAYMENT')}>Record payment</ActionBtn>}
+              {editable && checkInToday && (b.status === 'CONFIRMED' || b.status === 'PENDING') && (
                 <ActionBtn primary icon={UserCheck} busy={busy === 'CHECKED_IN'} onClick={() => setStatus('CHECKED_IN', {}, 'Checked in')}>Check in</ActionBtn>
               )}
-              {b.status === 'PENDING' && <ActionBtn icon={CheckCircle2} busy={busy === 'CONFIRMED'} onClick={() => setStatus('CONFIRMED', {}, 'Booking confirmed')}>Confirm</ActionBtn>}
-              {b.status === 'CHECKED_IN' && <ActionBtn primary icon={CheckCircle2} busy={busy === 'COMPLETED'} onClick={() => setStatus('COMPLETED', {}, 'Marked completed')}>Complete</ActionBtn>}
-              {(b.status === 'CONFIRMED' || b.status === 'PENDING' || b.status === 'CHECKED_IN') && (
+              {editable && b.status === 'PENDING' && <ActionBtn icon={CheckCircle2} busy={busy === 'CONFIRMED'} onClick={() => setStatus('CONFIRMED', {}, 'Booking confirmed')}>Confirm</ActionBtn>}
+              {editable && b.status === 'CHECKED_IN' && <ActionBtn primary icon={CheckCircle2} busy={busy === 'COMPLETED'} onClick={() => setStatus('COMPLETED', {}, 'Marked completed')}>Complete</ActionBtn>}
+              {editable && (b.status === 'CONFIRMED' || b.status === 'PENDING' || b.status === 'CHECKED_IN') && (
                 <ActionBtn icon={CalendarClock} onClick={() => setForm('reschedule')}>Reschedule</ActionBtn>
               )}
-              {b.status !== 'COMPLETED' && <ActionBtn icon={Pencil} onClick={() => setForm('edit')}>Edit</ActionBtn>}
-              {active && b.balance > 0 && <ActionBtn icon={Wallet} onClick={() => setPayKind('PAYMENT')}>Record payment</ActionBtn>}
-              {ctx.permissions.canRefund && net > 0 && <ActionBtn icon={RotateCcw} onClick={() => setPayKind('REFUND')}>Refund</ActionBtn>}
-              {b.status === 'CANCELLED' && <ActionBtn icon={RotateCcw} busy={busy === 'CONFIRMED'} onClick={() => setStatus('CONFIRMED', {}, 'Booking reinstated')}>Reinstate</ActionBtn>}
-              {active && b.status !== 'COMPLETED' && <ActionBtn danger icon={XCircle} onClick={() => setConfirmCancel(true)}>Cancel booking</ActionBtn>}
+              {editable && b.status !== 'COMPLETED' && <ActionBtn icon={Pencil} onClick={() => setForm('edit')}>Edit</ActionBtn>}
+              {editable && active && b.balance > 0 && <ActionBtn icon={Wallet} onClick={() => setPayKind('PAYMENT')}>Record payment</ActionBtn>}
+              {editable && ctx.permissions.canRefund && net > 0 && <ActionBtn icon={RotateCcw} onClick={() => setPayKind('REFUND')}>Refund</ActionBtn>}
+              {editable && b.status === 'CANCELLED' && <ActionBtn icon={RotateCcw} busy={busy === 'CONFIRMED'} onClick={() => setStatus('CONFIRMED', {}, 'Booking reinstated')}>Reinstate</ActionBtn>}
+              {editable && active && b.status !== 'COMPLETED' && <ActionBtn danger icon={XCircle} onClick={() => setConfirmCancel(true)}>Cancel booking</ActionBtn>}
             </div>
           ) : undefined
         }
@@ -156,6 +161,14 @@ export function BookingDetails({ ctx, bookingId, onClose, onChanged }: {
               </div>
             )}
             {!canEdit && <p className="text-xs text-muted-foreground">You have view-only access to bookings.</p>}
+            {canEdit && lockReason && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-xs px-3 py-2 flex items-start gap-2">
+                <Lock size={13} className="mt-0.5 flex-shrink-0" /> <span>{lockReason}{active && b.balance > 0 ? ' You can still record a payment that is owed.' : ''}</span>
+              </div>
+            )}
+            {editable && !checkInToday && (b.status === 'CONFIRMED' || b.status === 'PENDING') && (
+              <p className="text-xs text-muted-foreground">Check-in opens on the day of the booking.</p>
+            )}
           </div>
         )}
       </Modal>

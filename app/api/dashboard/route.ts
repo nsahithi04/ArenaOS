@@ -6,7 +6,7 @@ import { computeMetrics, type MetricBooking, type MetricPayment } from '@/lib/bo
 import { bookingSelect, toBookingDTO } from '@/lib/booking/queries'
 import { handleError, jsonError, requireVenue } from '@/lib/booking/route-helpers'
 import { loadVenueConfig } from '@/lib/booking/service'
-import { addDays, diffDays, localRangeToUtc, todayIn } from '@/lib/booking/time'
+import { addDays, diffDays, localMinutesOf, localRangeToUtc, todayIn } from '@/lib/booking/time'
 import { resolveRange } from '@/lib/booking/ranges'
 
 async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<ReturnType<typeof loadVenueConfig>>, from: string, to: string) {
@@ -76,13 +76,14 @@ export async function GET(req: Request) {
         where: { venueId, status: { in: ['PENDING', 'CONFIRMED'] }, startTime: { gte: now } },
         select: bookingSelect,
         orderBy: { startTime: 'asc' },
-        take: 6,
+        take: 8,
       }),
       prisma.booking.findMany({ where: { venueId }, select: bookingSelect, orderBy: { createdAt: 'desc' }, take: 6 }),
+      // Today's remaining bookings per court (for "Courts right now")
       prisma.booking.findMany({
-        where: { venueId, status: { not: 'CANCELLED' }, startTime: { lte: now }, endTime: { gt: now } },
-        select: { courtId: true },
-        distinct: ['courtId'],
+        where: { venueId, status: { not: 'CANCELLED' }, endTime: { gt: now }, startTime: { lt: localRangeToUtc(today, today, cfg.timezone).end } },
+        select: { courtId: true, customer: true, startTime: true, endTime: true },
+        orderBy: { startTime: 'asc' },
       }),
     ])
     const t = todayMetrics ?? current
@@ -107,8 +108,21 @@ export async function GET(req: Request) {
       today_: strip({ gross: t.gross, collected: t.collected, bookings: t.bookings, pending: t.pending }),
       upcoming: upcoming.map(dto),
       recent: recent.map(dto),
-      courtsInUseNow: liveNow.length,
+      courtsInUseNow: new Set(liveNow.filter((b) => b.startTime <= now).map((b) => b.courtId)).size,
       activeCourts: cfg.courts.filter((c) => c.isActive).length,
+      // Per court: who is on it now, and the next booking later today. Customer names only.
+      courtsNow: cfg.courts.filter((c) => c.isActive).map((c) => {
+        const mine = liveNow.filter((b) => b.courtId === c.id)
+        const cur = mine.find((b) => b.startTime <= now)
+        const next = mine.find((b) => b.startTime > now)
+        const mins = (d: Date) => localMinutesOf(d, cfg.timezone)
+        return {
+          courtId: c.id,
+          name: c.name,
+          current: cur ? { customer: cur.customer, endMin: mins(cur.endTime) || 1440 } : null,
+          next: next ? { customer: next.customer, startMin: mins(next.startTime) } : null,
+        }
+      }),
     })
   } catch (err) {
     return handleError(err, 'dashboard GET')

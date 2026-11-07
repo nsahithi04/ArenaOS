@@ -3,6 +3,7 @@
 // Client-side helpers shared by the Bookings, Calendar and Dashboard screens.
 
 import { useCallback, useEffect, useState } from 'react'
+import { canChangeBookingOn, canCheckInOn, correctionWindowDays, lockMessage } from '@/lib/booking/locks'
 
 // ─── Types mirrored from the API ────────────────────────────────────────────
 
@@ -269,6 +270,8 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   )
 }
 
+const modalStack: { close: () => void }[] = []
+
 export function Modal({ title, subtitle, onClose, children, width = 'max-w-lg', footer }: {
   title: string
   subtitle?: string
@@ -277,10 +280,18 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-lg', 
   width?: string
   footer?: React.ReactNode
 }) {
+  // Escape closes only the top-most modal when several are stacked.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const entry = { close: onClose }
+    modalStack.push(entry)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === entry) entry.close()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      modalStack.splice(modalStack.indexOf(entry), 1)
+    }
   }, [onClose])
   return (
     <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50 sm:p-4" onClick={onClose}>
@@ -342,4 +353,26 @@ export function ConfirmDialog({ title, message, confirmLabel, danger, busy, onCo
       {children}
     </Modal>
   )
+}
+
+// ─── Booking locks (mirror of lib/booking/locks.ts; the server enforces them) ─
+
+export function lockActorFromCtx(ctx: BookingContext) {
+  return { isOwner: ctx.permissions.isOwner, canCorrect: ctx.permissions.canRefund }
+}
+
+/** null when this person may change bookings on `date`, else the reason it's locked. */
+export function bookingLockReason(ctx: BookingContext, date: string): string | null {
+  const actor = lockActorFromCtx(ctx)
+  return canChangeBookingOn(actor, date, ctx.today) ? null : lockMessage(actor)
+}
+
+export function canCheckInToday(ctx: BookingContext, date: string) {
+  return canCheckInOn(date, ctx.today)
+}
+
+/** Earliest date this person may create or move bookings to (undefined = no limit). */
+export function earliestEditableDate(ctx: BookingContext): string | undefined {
+  const days = correctionWindowDays(lockActorFromCtx(ctx))
+  return Number.isFinite(days) ? addDays(ctx.today, -days) : undefined
 }

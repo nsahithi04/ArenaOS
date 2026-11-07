@@ -10,6 +10,7 @@ import * as bookings from '@/app/api/bookings/route'
 import * as bookingById from '@/app/api/bookings/[id]/route'
 import * as payments from '@/app/api/bookings/[id]/payments/route'
 import * as dashboard from '@/app/api/dashboard/route'
+import * as dashDetails from '@/app/api/dashboard/details/route'
 import * as courtBlocks from '@/app/api/court-blocks/route'
 import { addStaff, DATE, prisma, resetDatabase, seedVenue } from './fixtures'
 
@@ -206,5 +207,24 @@ describe.skipIf(!enabled)('booking API routes', () => {
     expect(today.current.collected).toBe(65)
     // Dashboard lists never carry contact details
     expect(today.recent.every((r: { phone: unknown; email: unknown }) => r.phone === null && r.email === null)).toBe(true)
+
+    // Drill-down popups add up to exactly the card figures
+    const det = async (q: string) => (await dashDetails.GET(get(`/api/dashboard/details?venueId=${A.venue.id}&${q}`))).json()
+    const pays = await det('kind=payments&range=today')
+    const net = pays.payments.reduce((s: number, p: { kind: string; amount: number }) => s + (p.kind === 'PAYMENT' ? p.amount : -p.amount), 0)
+    expect(net).toBe(today.current.collected)
+    const pend = await det(`kind=pending&range=custom&from=${DATE}&to=${DATE}`)
+    expect(pend.bookings.reduce((s: number, b: { balance: number }) => s + b.balance, 0)).toBe(d.current.pending.outstanding)
+    const booked = await det(`kind=bookings&range=custom&from=${DATE}&to=${DATE}`)
+    expect(booked.bookings).toHaveLength(d.current.bookings)
+    expect(booked.bookings.reduce((s: number, b: { amount: number }) => s + b.amount, 0)).toBe(d.current.gross)
+    expect(booked.bookings.every((b: { phone: unknown }) => b.phone === null)).toBe(true)
+    const canc = await det(`kind=cancellations&range=custom&from=${DATE}&to=${DATE}`)
+    expect(canc.bookings).toHaveLength(d.current.cancellations.count)
+    const byCourt = await det(`kind=bookings&date=${DATE}&courtId=${A.court1.id}`)
+    expect(byCourt.bookings.every((b: { courtId: string }) => b.courtId === A.court1.id)).toBe(true)
+    expect((await dashDetails.GET(get(`/api/dashboard/details?venueId=${A.venue.id}&kind=everything`))).status).toBe(400)
+    as(viewer.id)
+    expect((await dashDetails.GET(get(`/api/dashboard/details?venueId=${A.venue.id}&kind=payments`))).status).toBe(403)
   })
 })

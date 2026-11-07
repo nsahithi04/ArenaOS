@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Plus, Wrench, User, Clock, CalendarPlus } from "lucide-react";
 import {
   addDays, api, ApiError, BRAND_GRADIENT, clockToMin, ConfirmDialog, dayName, ErrorState, fmtDate, fmtDuration, fmtTime, hhmm,
-  inputCls, Modal, money, nowMinutesIn, sourceLabel, Spinner, STATUS, useBookingContext, weekStart,
+  inputCls, Modal, money, nowMinutesIn, sourceLabel, Spinner, STATUS, useBookingContext, weekStart, bookingLockReason,
   type Booking, type BookingContext, type BookingStatus, type CourtBlock,
 } from "@/components/bookings/shared";
 import { BookingForm, type BookingFormMode, type BookingFormPrefill } from "@/components/bookings/booking-form";
@@ -142,6 +142,8 @@ export function CalendarScreen() {
 
   const onSlotClick = (col: Column, e: React.MouseEvent<HTMLDivElement>) => {
     if (!canEdit) return;
+    const locked = bookingLockReason(ctx, col.date);
+    if (locked) { toast.info(locked); return; }
     const rect = e.currentTarget.getBoundingClientRect();
     const minute = startH * 60 + Math.floor(((e.clientY - rect.top) / SLOT_HEIGHT) * 2) * 30;
     setSlot({ courtId: col.courtId, date: col.date, startMin: Math.max(0, Math.min(minute, 1410)) });
