@@ -6,7 +6,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CheckCircle2, Clock } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, CheckCircle2, Clock } from 'lucide-react'
+import { PlayerPicker, type PlayerChoice } from '@/components/club/player-picker'
 import {
   api, ApiError, BRAND_GRADIENT, inputCls, METHODS, Modal, money, SOURCES, Spinner, hhmm, parseHHmm, fmtDuration, fmtTime,
   nowMinutesIn, earliestEditableDate,
@@ -67,6 +68,11 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
   const [manualPrice, setManualPrice] = useState(booking ? String(booking.amount) : '')
   const [overrideHours, setOverrideHours] = useState(false)
   const [takePayment, setTakePayment] = useState(mode === 'walkin')
+  // Member bookings: court time is covered by the member's membership.
+  const [isMember, setIsMember] = useState(false)
+  const [member, setMember] = useState<PlayerChoice>(null)
+  const memberInfo = member?.kind === 'existing' ? member.player.membership : null
+  const coveredBy = isNew ? (isMember && memberInfo ? memberInfo.planName : null) : booking?.membershipPlan ?? null
   const [payMethod, setPayMethod] = useState<PaymentMethod>('CASH')
   const [payAmount, setPayAmount] = useState('')
   const [payAmountTouched, setPayAmountTouched] = useState(false)
@@ -105,7 +111,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
     return () => clearTimeout(t)
   }, [courtId, sportId, date, startMin, endMin, booking?.id, ctx.venue.id])
 
-  const effectivePrice = overridePrice ? Number(manualPrice) : quote?.amount ?? null
+  const effectivePrice = coveredBy ? 0 : overridePrice ? Number(manualPrice) : quote?.amount ?? null
   const scheduleChanged = booking ? booking.courtId !== courtId || booking.date !== date || booking.startMin !== startMin || booking.durationMin !== duration : true
 
   // Walk-ins: default the payment amount to the full price until the user edits it.
@@ -115,6 +121,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
 
   function validate(): Record<string, string> {
     const e: Record<string, string> = {}
+    if (isNew && isMember && !memberInfo) e.customer = 'Choose a member'
     if (!scheduleOnly && !customer.trim()) e.customer = 'Customer name is required'
     if (!courtId) e.courtId = 'Choose a court'
     if (!date) e.date = 'Choose a date'
@@ -152,11 +159,12 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
             email: email || null,
             source,
             ...window,
-            amount: overridePrice ? Number(manualPrice) : null,
+            amount: coveredBy ? null : overridePrice ? Number(manualPrice) : null,
+            membershipId: isMember && memberInfo ? memberInfo.id : null,
             status,
             notes: notes || null,
             overrideHours,
-            initialPayment: takePayment ? { amount: Number(payAmount), method: payMethod } : null,
+            initialPayment: takePayment && !coveredBy ? { amount: Number(payAmount), method: payMethod } : null,
           },
         })
         id = res.id
@@ -208,6 +216,8 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
           <div className="text-sm min-w-0">
             {quoting ? (
               <span className="text-muted-foreground flex items-center gap-2"><Spinner /> Checking…</span>
+            ) : coveredBy ? (
+              <span className="font-semibold text-purple-700 flex items-center gap-1.5"><BadgeCheck size={14} /> Covered by membership</span>
             ) : effectivePrice != null && Number.isFinite(effectivePrice) ? (
               <span className="font-semibold text-foreground">{money(effectivePrice, currency)}</span>
             ) : (
@@ -230,7 +240,37 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
       }
     >
       <div className="space-y-4">
-        {!scheduleOnly && (
+        {isNew && (
+          <div>
+            <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+              {[['guest', 'Guest'], ['member', 'Member']].map(([k, t]) => (
+                <button key={k} type="button" onClick={() => { setIsMember(k === 'member'); setMember(null) }}
+                  className={`px-3 py-1.5 rounded-md text-sm ${isMember === (k === 'member') ? 'bg-white shadow-sm font-medium text-foreground' : 'text-muted-foreground'}`}>{t}</button>
+              ))}
+            </div>
+            {isMember && (
+              <div className="mt-3">
+                <PlayerPicker ctx={ctx} value={member} membersOnly date={date} allowNew={false} label="Member"
+                  onChange={(c) => {
+                    setMember(c)
+                    if (c?.kind === 'existing') {
+                      setCustomer(c.player.name)
+                      setPhone(c.player.phone ?? '')
+                      setEmail(c.player.email ?? '')
+                      if (c.player.membership?.sportId) setSportId(c.player.membership.sportId)
+                    }
+                  }} />
+                {err('customer')}
+              </div>
+            )}
+          </div>
+        )}
+        {!isNew && coveredBy && (
+          <div className="rounded-lg bg-purple-50 border border-purple-200 text-purple-800 text-sm px-3 py-2 flex items-center gap-2">
+            <BadgeCheck size={14} /> Member booking, covered by {coveredBy}
+          </div>
+        )}
+        {!scheduleOnly && !(isNew && isMember) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               {label('Customer name', true)}
@@ -335,7 +375,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
               )}
             </div>
 
-            <div>
+            {!coveredBy && <div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={overridePrice} onChange={(e) => { setOverridePrice(e.target.checked); if (e.target.checked && !manualPrice && quote) setManualPrice(quote.amount.toFixed(2)) }} />
                 Set price manually
@@ -348,9 +388,9 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
               {!isNew && booking && scheduleChanged && booking.priceOverridden && !overridePrice && (
                 <p className="text-xs text-muted-foreground mt-1">The manual price will be replaced by the calculated price.</p>
               )}
-            </div>
+            </div>}
 
-            {isNew && (
+            {isNew && !coveredBy && (
               <div className="rounded-lg border border-border p-3 space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <input type="checkbox" checked={takePayment} onChange={(e) => setTakePayment(e.target.checked)} /> Record payment now

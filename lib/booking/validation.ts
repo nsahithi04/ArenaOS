@@ -132,6 +132,8 @@ export type CreateBookingInput = {
   notes: string | null
   overrideHours: boolean
   initialPayment: InitialPayment | null
+  /** When set, the court time is covered by this membership (price 0). */
+  membershipId: string | null
 }
 
 function contact(o: Obj, errors: Record<string, string>) {
@@ -186,9 +188,12 @@ export function validateCreateBooking(body: unknown): CreateBookingInput {
   const status = oneOf(o, 'status', ['PENDING', 'CONFIRMED'] as const, errors, 'Status') ?? 'CONFIRMED'
   const notes = str(o, 'notes', errors, { max: 1000, label: 'Notes' })
   const pay = initialPayment(o, errors)
+  const membershipId = id(o, 'membershipId', errors, 'Membership', false)
+  if (membershipId && pay) errors.initialPayment = 'Member bookings are covered by the membership; no payment needed'
 
   if (Object.keys(errors).length) throw new ValidationError(errors)
   return {
+    membershipId,
     venueId,
     courtId: courtId!,
     sportId,

@@ -11,6 +11,8 @@ export const bookingSelect = {
   court: { select: { name: true } },
   sportRef: { select: { name: true, emoji: true } },
   payments: { select: { kind: true, amount: true } },
+  playerId: true,
+  membership: { select: { id: true, plan: { select: { name: true } } } },
 } satisfies Prisma.BookingSelect
 
 type BookingRow = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
@@ -55,6 +57,9 @@ export function toBookingDTO(b: BookingRow, tz: string, opts: { includeContact: 
     balance: b.status === 'CANCELLED' ? 0 : Math.max(0, Math.round((amount - net) * 100) / 100),
     priceOverridden: b.priceOverridden,
     notes: b.notes,
+    playerId: b.playerId,
+    membershipId: b.membership?.id ?? null,
+    membershipPlan: b.membership?.plan.name ?? null,
     cancelledAt: b.cancelledAt?.toISOString() ?? null,
     cancelReason: b.cancelReason,
     createdAt: b.createdAt.toISOString(),

@@ -59,11 +59,23 @@ export async function GET(req: Request) {
     }
 
     if (kind === 'payments') {
+      // Court/sport/source filters only apply to booking payments; otherwise include memberships and classes too.
+      const category = sp.get('category')
+      const bookingOnly = !!(courtId || sportId || sportName || sources?.length) || category === 'BOOKING'
+      const where: Prisma.PaymentWhereInput = {
+        venueId,
+        receivedAt: { gte: start, lt: end },
+        ...(bookingOnly && { booking: bookingFilter }),
+        ...(category === 'MEMBERSHIP' && { membershipId: { not: null } }),
+        ...(category === 'CLASS' && { enrollmentId: { not: null } }),
+      }
       const rows = await prisma.payment.findMany({
-        where: { venueId, receivedAt: { gte: start, lt: end }, booking: bookingFilter },
+        where,
         select: {
           id: true, kind: true, method: true, amount: true, receivedAt: true, bookingId: true,
           booking: { select: { customer: true, startTime: true, court: { select: { name: true } } } },
+          membership: { select: { player: { select: { name: true } }, plan: { select: { name: true } } } },
+          enrollment: { select: { player: { select: { name: true } }, class: { select: { name: true } } } },
         },
         orderBy: { receivedAt: 'desc' },
         take: LIMIT,
@@ -78,9 +90,10 @@ export async function GET(req: Request) {
           receivedDate: localDateOf(p.receivedAt, tz),
           receivedMin: localMinutesOf(p.receivedAt, tz),
           bookingId: p.bookingId,
-          customer: p.booking.customer,
-          courtName: p.booking.court.name,
-          bookingDate: localDateOf(p.booking.startTime, tz),
+          customer: p.booking?.customer ?? p.membership?.player.name ?? p.enrollment?.player.name ?? '—',
+          // For membership/class payments this column describes what was paid for.
+          courtName: p.booking?.court.name ?? (p.membership ? `Membership · ${p.membership.plan.name}` : `Class · ${p.enrollment?.class.name ?? ''}`),
+          bookingDate: p.booking ? localDateOf(p.booking.startTime, tz) : null,
         })),
       })
     }

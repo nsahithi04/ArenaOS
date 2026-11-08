@@ -18,7 +18,7 @@ export type DetailSpec =
   | { kind: 'occupancy'; title: string; explain: React.ReactNode; courts: CourtRow[] }
   | { kind: 'sources'; title: string; explain: React.ReactNode; sources: SourceRow[] }
 
-type Payment = { id: string; kind: 'PAYMENT' | 'REFUND'; method: string; amount: number; receivedDate: string; receivedMin: number; bookingId: string; customer: string; courtName: string; bookingDate: string }
+type Payment = { id: string; kind: 'PAYMENT' | 'REFUND'; method: string; amount: number; receivedDate: string; receivedMin: number; bookingId: string | null; customer: string; courtName: string; bookingDate: string | null }
 type DetailsResponse = { currency: string; truncated: boolean; payments?: Payment[]; bookings?: Booking[] }
 
 const th = 'text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap'
@@ -76,10 +76,10 @@ function PaymentsTable({ rows, currency, onOpenBooking }: { rows: Payment[]; cur
   return (
     <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full">
-        <thead className="bg-muted/40"><tr>{['Received', 'Customer', 'Court', 'Method', 'Amount'].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+        <thead className="bg-muted/40"><tr>{['Received', 'Customer', 'For', 'Method', 'Amount'].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
         <tbody>
           {rows.map((p) => (
-            <tr key={p.id} onClick={() => onOpenBooking(p.bookingId)} className="border-t border-border hover:bg-muted/20 cursor-pointer">
+            <tr key={p.id} onClick={() => p.bookingId && onOpenBooking(p.bookingId)} className={`border-t border-border ${p.bookingId ? 'hover:bg-muted/20 cursor-pointer' : ''}`}>
               <td className={td}>{fmtDate(p.receivedDate, { month: 'short', day: 'numeric' })} · {fmtTime(p.receivedMin)}</td>
               <td className={`${td} font-medium`}>{p.customer}</td>
               <td className={`${td} text-muted-foreground`}>{p.courtName}</td>

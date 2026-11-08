@@ -55,3 +55,28 @@ export async function readJson(req: Request): Promise<unknown> {
   if (text.length > 20_000) throw new ValidationError({ body: 'Request body too large' })
   return text ? JSON.parse(text) : {}
 }
+
+/**
+ * Authorise against the venue that owns an entity (looked up by the caller).
+ * Missing entities and other tenants' entities both answer 404; members lacking
+ * the permission get a 403 explaining why.
+ */
+export async function requireEntityVenue(
+  entityVenueId: string | null | undefined,
+  module: keyof VenuePermissions,
+  level: 'view' | 'edit',
+  notFound = 'Not found',
+): Promise<Ctx | Response> {
+  if (!entityVenueId) {
+    const ctx = await requireVenue(null, 'bookings', 'view')
+    return ctx instanceof Response && ctx.status === 401 ? ctx : jsonError(404, notFound)
+  }
+  const ctx = await requireVenue(entityVenueId, module, level)
+  if (ctx instanceof Response && ctx.status === 403) {
+    const body = (await ctx.clone().json()) as { error: string }
+    return body.error === 'Forbidden' ? jsonError(404, notFound) : ctx
+  }
+  return ctx
+}
+
+export const isId = (v: unknown): v is string => typeof v === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(v)

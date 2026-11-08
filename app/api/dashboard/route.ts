@@ -18,7 +18,10 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
     }),
     db.payment.findMany({
       where: { venueId, receivedAt: { gte: start, lt: end } },
-      select: { bookingId: true, kind: true, amount: true, receivedAt: true, booking: { select: { courtId: true, sportId: true, sport: true, source: true, sportRef: { select: { name: true } } } } },
+      select: {
+        bookingId: true, membershipId: true, enrollmentId: true, kind: true, amount: true, receivedAt: true,
+        booking: { select: { courtId: true, sportId: true, sport: true, source: true, sportRef: { select: { name: true } } } },
+      },
     }),
   ])
   const ids = bookings.filter((b) => b.status !== 'CANCELLED').map((b) => b.id)
@@ -28,7 +31,7 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
   const netPaid = new Map<string, number>()
   for (const s of sums) {
     const v = Number(s._sum.amount ?? 0) * (s.kind === 'PAYMENT' ? 1 : -1)
-    netPaid.set(s.bookingId, (netPaid.get(s.bookingId) ?? 0) + v)
+    if (s.bookingId) netPaid.set(s.bookingId, (netPaid.get(s.bookingId) ?? 0) + v)
   }
   return computeMetrics({
     tz: cfg.timezone,
@@ -39,8 +42,10 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
       status: b.status, startTime: b.startTime, endTime: b.endTime, amount: Number(b.amountUsd),
     })),
     payments: payments.map<MetricPayment>((p) => ({
-      bookingId: p.bookingId, kind: p.kind, amount: Number(p.amount), receivedAt: p.receivedAt, courtId: p.booking.courtId,
-      sportId: p.booking.sportId, sportName: p.booking.sportRef?.name ?? p.booking.sport, source: p.booking.source,
+      category: p.bookingId ? 'BOOKING' : p.membershipId ? 'MEMBERSHIP' : 'CLASS',
+      bookingId: p.bookingId, kind: p.kind, amount: Number(p.amount), receivedAt: p.receivedAt,
+      courtId: p.booking?.courtId ?? null, sportId: p.booking?.sportId ?? null,
+      sportName: p.booking ? p.booking.sportRef?.name ?? p.booking.sport : null, source: p.booking?.source ?? null,
     })),
     netPaidByBooking: netPaid,
     courts: cfg.courts,

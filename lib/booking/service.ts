@@ -14,6 +14,7 @@ import { ConflictError, isExclusionViolation, ServiceError } from './errors'
 import { quotePrice, type PriceQuote, type PricingRuleInput } from './pricing'
 import { formatMinutes, localDateOf, localMinutesOf, todayIn, zonedToUtc } from './time'
 import { canChangeBookingOn, canCheckInOn, lockMessage, MANAGER_CORRECTION_DAYS, type LockActor } from './locks'
+import { membershipForBooking } from '@/lib/club/membership-check'
 import {
   derivePaymentStatus,
   type BlockInput,
@@ -62,7 +63,7 @@ export async function loadVenueConfig(db: PrismaClient | Tx, venueId: string): P
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-async function lockCourts(tx: Tx, courtIds: string[]) {
+export async function lockCourts(tx: Tx, courtIds: string[]) {
   // Sorted order prevents deadlocks when a reschedule touches two courts.
   for (const id of [...new Set(courtIds)].sort()) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'court:' + id}))`
@@ -176,7 +177,9 @@ export async function createBooking(db: PrismaClient, venueId: string, actorId: 
   const start = zonedToUtc(input.date, input.startMin, cfg.timezone)
   const end = zonedToUtc(input.date, input.endMin, cfg.timezone)
   const quote = priceFor(cfg, court.id, sportId, input.date, input.startMin, input.endMin)
-  const { amount, overridden } = resolvePrice(quote, input.amount)
+  // Members play free: the membership covers the court time.
+  const membership = input.membershipId ? await membershipForBooking(db, venueId, input.membershipId, input.date, sportId) : null
+  const { amount, overridden } = membership ? { amount: 0, overridden: false } : resolvePrice(quote, input.amount)
 
   if (input.initialPayment && input.initialPayment.amount > amount) {
     throw new ServiceError(422, 'OVERPAYMENT', 'Payment cannot exceed the booking amount.')
@@ -204,6 +207,8 @@ export async function createBooking(db: PrismaClient, venueId: string, actorId: 
           payment: amount === 0 ? 'PAID' : 'PENDING',
           notes: input.notes,
           createdById: actorId,
+          playerId: membership?.playerId ?? null,
+          membershipId: membership?.id ?? null,
         },
       })
       if (input.initialPayment) {
@@ -287,6 +292,10 @@ export async function updateBooking(db: PrismaClient, venueId: string, actorId: 
     courtFor(cfg, courtId)
     assertHours(cfg, sportId, date, startMin, endMin, input.overrideHours)
   }
+  // A member booking stays covered only if the membership is still valid for the new date/sport.
+  if (existing.membershipId && (scheduleChanged || reinstating || sportChanged)) {
+    await membershipForBooking(db, venueId, existing.membershipId, date, sportId)
+  }
 
   // Price: explicit amount wins; otherwise re-price when the slot/sport changes
   // (unless staff previously set a manual price), or when asked to.
@@ -296,7 +305,7 @@ export async function updateBooking(db: PrismaClient, venueId: string, actorId: 
     const q = priceFor(cfg, courtId, sportId, date, startMin, endMin)
     amount = input.amount
     overridden = input.amount !== q.total || q.uncoveredMinutes > 0
-  } else if (input.recalculatePrice || ((scheduleChanged || sportChanged) && !existing.priceOverridden)) {
+  } else if (!existing.membershipId && (input.recalculatePrice || ((scheduleChanged || sportChanged) && !existing.priceOverridden))) {
     const q = priceFor(cfg, courtId, sportId, date, startMin, endMin)
     if (q.uncoveredMinutes > 0) {
       throw new ServiceError(422, 'NO_PRICE', 'No pricing rule covers part of the new slot. Enter the price manually.')

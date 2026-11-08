@@ -112,6 +112,7 @@ export function BookingDetails({ ctx, bookingId, onClose, onChanged }: {
                   <StatusBadge status={b.status} />
                   <PaymentBadge payment={b.payment} paid={b.paid} balance={b.balance} />
                   <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">{sourceLabel(b.source)}</span>
+                  {b.membershipPlan && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700">Member · {b.membershipPlan}</span>}
                 </div>
               </div>
             </div>
@@ -136,7 +137,7 @@ export function BookingDetails({ ctx, bookingId, onClose, onChanged }: {
             </dl>
 
             <div className="rounded-lg bg-muted/40 p-3 text-sm space-y-1">
-              <Row k={`Price${b.priceOverridden ? ' (manual)' : ''}`} v={money(b.amount, currency)} />
+              <Row k={`Price${b.priceOverridden ? ' (manual)' : ''}`} v={b.membershipPlan ? `Covered by ${b.membershipPlan}` : money(b.amount, currency)} />
               <Row k="Paid" v={money(b.paid, currency)} />
               {b.refunded > 0 && <Row k="Refunded" v={`−${money(b.refunded, currency)}`} />}
               {active && <Row k="Balance due" v={money(b.balance, currency)} strong={b.balance > 0} />}

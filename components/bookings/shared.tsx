@@ -38,6 +38,9 @@ export type Booking = {
   balance: number
   priceOverridden: boolean
   notes: string | null
+  playerId: string | null
+  membershipId: string | null
+  membershipPlan: string | null
   cancelledAt: string | null
   cancelReason: string | null
   createdAt: string
@@ -50,7 +53,11 @@ export type BookingDetail = Booking & {
   paymentHistory: { id: string; kind: 'PAYMENT' | 'REFUND'; method: PaymentMethod; amount: number; receivedAt: string; note: string | null; recordedByName: string | null }[]
 }
 
-export type CourtBlock = { id: string; courtId: string; reason: string | null; start: string; end: string; date: string; startMin: number; endMin: number }
+export type CourtBlock = {
+  id: string; courtId: string; reason: string | null; start: string; end: string; date: string; startMin: number; endMin: number
+  /** Set when the block is a coaching-class session */
+  classId: string | null; className: string | null; coachName: string | null
+}
 
 export type HoursRow = { sportId: string | null; day: string; openTime: string; closeTime: string; isClosed: boolean }
 
@@ -60,7 +67,7 @@ export type BookingContext = {
   courts: { id: string; name: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
   sports: { id: string; name: string; emoji: string | null }[]
   hours: HoursRow[]
-  permissions: { isOwner: boolean; canEditBookings: boolean; canRefund: boolean; canViewReports: boolean }
+  permissions: { isOwner: boolean; canEditBookings: boolean; canRefund: boolean; canViewReports: boolean; canManageVenue: boolean }
 }
 
 // ─── Labels & colours (match the existing GameOn screens) ───────────────────
@@ -191,7 +198,7 @@ export function clockToMin(s: string, isClose = false): number | null {
 // ─── API ────────────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public code?: string, public fields?: Record<string, string>) {
+  constructor(message: string, public status: number, public code?: string, public fields?: Record<string, string>, public details?: Record<string, unknown>) {
     super(message)
   }
 }
@@ -210,8 +217,8 @@ export async function api<T>(url: string, init?: RequestInit & { json?: unknown 
     /* non-JSON */
   }
   if (!res.ok) {
-    const d = (data ?? {}) as { error?: string; code?: string; fields?: Record<string, string> }
-    throw new ApiError(d.error ?? `Request failed (${res.status})`, res.status, d.code, d.fields)
+    const d = (data ?? {}) as { error?: string; code?: string; fields?: Record<string, string>; details?: Record<string, unknown> }
+    throw new ApiError(d.error ?? `Request failed (${res.status})`, res.status, d.code, d.fields, d.details)
   }
   return data as T
 }

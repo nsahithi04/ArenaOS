@@ -73,26 +73,26 @@ model User {
   staffVenueId String?
   staffVenue   Venue?  @relation("VenueStaff", fields: [staffVenueId], references: [id])
 
-  accounts              Account[]
-  sessions              Session[]
-  notificationPrefs     NotificationPrefs?
-  venueMemberships      VenueMember[]
-  bookingsCreated       Booking[]    @relation("BookingCreatedBy")
-  paymentsRecorded      Payment[]    @relation("PaymentRecordedBy")
-  courtBlocksCreated    CourtBlock[] @relation("CourtBlockCreatedBy")
+  accounts           Account[]
+  sessions           Session[]
+  notificationPrefs  NotificationPrefs?
+  venueMemberships   VenueMember[]
+  bookingsCreated    Booking[]          @relation("BookingCreatedBy")
+  paymentsRecorded   Payment[]          @relation("PaymentRecordedBy")
+  courtBlocksCreated CourtBlock[]       @relation("CourtBlockCreatedBy")
 }
 
 model NotificationPrefs {
-  id             String  @id @default(cuid())
-  userId         String  @unique
-  newBooking     Boolean @default(false)
-  cancellation   Boolean @default(false)
-  payment        Boolean @default(false)
-  checkin        Boolean @default(false)
-  dailySummary   Boolean @default(false)
-  weeklySummary  Boolean @default(false)
-  lowOccupancy   Boolean @default(false)
-  smsAlerts      Boolean @default(false)
+  id            String  @id @default(cuid())
+  userId        String  @unique
+  newBooking    Boolean @default(false)
+  cancellation  Boolean @default(false)
+  payment       Boolean @default(false)
+  checkin       Boolean @default(false)
+  dailySummary  Boolean @default(false)
+  weeklySummary Boolean @default(false)
+  lowOccupancy  Boolean @default(false)
+  smsAlerts     Boolean @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -121,43 +121,47 @@ enum OnboardingStep {
 }
 
 model Venue {
-  id              String         @id @default(cuid())
-  name            String
-  slug            String         @unique
-  description     String?
-  type            VenueType      @default(PRIVATE)
-  status          VenueStatus    @default(ACTIVE)
-  phone           String?
-  email           String?
-  website         String?
-  address         String?
-  city            String?
-  state           String?
-  zip             String?
-  country         String?
-  latitude        Float?
-  longitude       Float?
-  timezone        String         @default("UTC") // IANA zone, e.g. America/Phoenix
-  currency        String         @default("USD") // ISO 4217 code used for display
-  onboardingStep  OnboardingStep @default(FACILITY)
-  isSetupDone     Boolean        @default(false)
-  ownerId         String
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  name           String
+  slug           String         @unique
+  description    String?
+  type           VenueType      @default(PRIVATE)
+  status         VenueStatus    @default(ACTIVE)
+  phone          String?
+  email          String?
+  website        String?
+  address        String?
+  city           String?
+  state          String?
+  zip            String?
+  country        String?
+  latitude       Float?
+  longitude      Float?
+  timezone       String         @default("UTC") // IANA zone, e.g. America/Phoenix
+  currency       String         @default("USD") // ISO 4217 code used for display
+  onboardingStep OnboardingStep @default(FACILITY)
+  isSetupDone    Boolean        @default(false)
+  ownerId        String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  owner          User             @relation("VenueOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  staff          User[]           @relation("VenueStaff")
-  courts         Court[]
-  sports         Sport[]
-  images         VenueImage[]
-  amenities      VenueAmenity[]
-  operatingHours OperatingHours[]
-  pricingRules   PricingRule[]
-  bookings       Booking[]
-  walkIns        WalkInBooking[]
-  courtBlocks    CourtBlock[]
-  venueRoles     VenueRole[]
-  venueMembers   VenueMember[]
+  owner           User             @relation("VenueOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  staff           User[]           @relation("VenueStaff")
+  courts          Court[]
+  sports          Sport[]
+  images          VenueImage[]
+  amenities       VenueAmenity[]
+  operatingHours  OperatingHours[]
+  pricingRules    PricingRule[]
+  bookings        Booking[]
+  walkIns         WalkInBooking[]
+  courtBlocks     CourtBlock[]
+  players         Player[]
+  membershipPlans MembershipPlan[]
+  memberships     Membership[]
+  classes         Class[]
+  venueRoles      VenueRole[]
+  venueMembers    VenueMember[]
 }
 
 // ─── Venue Roles & Members ────────────────────────────────────────────────────
@@ -168,17 +172,17 @@ enum VenueRolePreset {
 }
 
 model VenueRole {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
   venueId     String
   // Built-in roles every venue gets. Their permissions are fixed in code
   // (lib/team/presets.ts) and they cannot be renamed or deleted.
   preset      VenueRolePreset?
   name        String
-  color       String   @default("#16a34a")
+  color       String           @default("#16a34a")
   // permissions stored as JSON: { bookings, venue, reports, billing, team }
   // each value: "none" | "view" | "edit"
-  permissions Json     @default("{}")
-  createdAt   DateTime @default(now())
+  permissions Json             @default("{}")
+  createdAt   DateTime         @default(now())
 
   venue   Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
   members VenueMember[]
@@ -187,16 +191,16 @@ model VenueRole {
 }
 
 model VenueMember {
-  id        String   @id @default(cuid())
-  venueId   String
-  userId    String?
-  roleId    String?
-  email     String
-  name      String
-  status        String    @default("invited") // invited | active
-  inviteToken   String?   @unique
-  inviteExpiry  DateTime?
-  createdAt     DateTime  @default(now())
+  id           String    @id @default(cuid())
+  venueId      String
+  userId       String?
+  roleId       String?
+  email        String
+  name         String
+  status       String    @default("invited") // invited | active
+  inviteToken  String?   @unique
+  inviteExpiry DateTime?
+  createdAt    DateTime  @default(now())
 
   venue Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
   role  VenueRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
@@ -232,16 +236,18 @@ model VenueImage {
 // ─── Sports (venue-specific, no hardcoded enum) ───────────────────────────────
 
 model Sport {
-  id      String @id @default(cuid())
+  id      String  @id @default(cuid())
   venueId String
   name    String
   emoji   String?
 
-  venue          Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  courts         Court[]
-  operatingHours OperatingHours[]
-  pricingRules   PricingRule[]
-  bookings       Booking[]
+  venue           Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  courts          Court[]
+  operatingHours  OperatingHours[]
+  pricingRules    PricingRule[]
+  bookings        Booking[]
+  membershipPlans MembershipPlan[]
+  classes         Class[]
 
   @@unique([venueId, name])
 }
@@ -362,33 +368,37 @@ enum PaymentKind {
 // PostgreSQL by the "Booking_no_overlap" exclusion constraint (see migration
 // 1_phase1_booking_engine), which Prisma cannot express in this schema.
 model Booking {
-  id           String        @id @default(cuid())
-  venueId      String
-  courtId      String
-  sportId      String?
-  customer     String
-  phone        String?
-  email        String?
-  sport        String? // display name snapshot (legacy rows have no sportId)
-  source       BookingSource @default(OTHER)
-  startTime    DateTime
-  endTime      DateTime
-  amountUsd    Decimal       @db.Decimal(10, 2) // booked price, in the venue currency
-  priceOverridden Boolean    @default(false)
-  payment      PaymentStatus @default(PENDING) // summary, derived from Payment rows
-  status       BookingStatus @default(CONFIRMED)
-  notes        String?
-  cancelledAt  DateTime?
-  cancelReason String?
-  createdById  String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  venueId         String
+  courtId         String
+  sportId         String?
+  customer        String
+  phone           String?
+  email           String?
+  sport           String? // display name snapshot (legacy rows have no sportId)
+  source          BookingSource @default(OTHER)
+  startTime       DateTime
+  endTime         DateTime
+  amountUsd       Decimal       @db.Decimal(10, 2) // booked price, in the venue currency
+  priceOverridden Boolean       @default(false)
+  payment         PaymentStatus @default(PENDING) // summary, derived from Payment rows
+  status          BookingStatus @default(CONFIRMED)
+  notes           String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdById     String?
+  playerId        String? // set for members (and any saved player)
+  membershipId    String? // set when the court time is covered by a membership
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  venue     Venue     @relation(fields: [venueId], references: [id])
-  court     Court     @relation(fields: [courtId], references: [id])
-  sportRef  Sport?    @relation(fields: [sportId], references: [id], onDelete: SetNull)
-  createdBy User?     @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  payments  Payment[]
+  venue      Venue       @relation(fields: [venueId], references: [id])
+  court      Court       @relation(fields: [courtId], references: [id])
+  player     Player?     @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  membership Membership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  sportRef   Sport?      @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  createdBy  User?       @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  payments   Payment[]
 
   @@index([venueId, startTime])
   @@index([courtId, startTime])
@@ -396,9 +406,13 @@ model Booking {
 
 // Money actually received (PAYMENT) or returned (REFUND) for a booking.
 // Collected revenue is computed from these rows, never from Booking.amountUsd.
+// Exactly one of bookingId / membershipId / enrollmentId is set
+// ("Payment_one_target" check constraint in migration 3_memberships_classes).
 model Payment {
   id           String        @id @default(cuid())
-  bookingId    String
+  bookingId    String?
+  membershipId String?
+  enrollmentId String?
   venueId      String
   kind         PaymentKind   @default(PAYMENT)
   method       PaymentMethod
@@ -408,11 +422,15 @@ model Payment {
   recordedById String?
   createdAt    DateTime      @default(now())
 
-  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  recordedBy User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  booking    Booking?    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  membership Membership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  enrollment Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  recordedBy User?       @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
 
   @@index([venueId, receivedAt])
   @@index([bookingId])
+  @@index([membershipId])
+  @@index([enrollmentId])
 }
 
 // Maintenance / unavailable periods for a court. Non-overlapping per court
@@ -424,14 +442,147 @@ model CourtBlock {
   startTime   DateTime
   endTime     DateTime
   reason      String?
+  classId     String? // set when this block is a session of a coaching class
   createdById String?
   createdAt   DateTime @default(now())
 
-  venue     Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  court     Court @relation(fields: [courtId], references: [id], onDelete: Cascade)
-  createdBy User? @relation("CourtBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  venue     Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  court     Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  class     Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("CourtBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([courtId, startTime])
+  @@index([classId, startTime])
+}
+
+// ─── Players, memberships, classes ────────────────────────────────────────────
+
+// A venue's customer record (members and students). Players don't log in.
+model Player {
+  id        String   @id @default(cuid())
+  venueId   String
+  name      String
+  phone     String?
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue       Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  enrollments Enrollment[]
+  bookings    Booking[]
+
+  @@index([venueId, name])
+}
+
+model MembershipPlan {
+  id             String   @id @default(cuid())
+  venueId        String
+  name           String
+  description    String?
+  durationMonths Int // 1 = monthly, 12 = yearly, …
+  price          Decimal  @db.Decimal(10, 2)
+  sportId        String? // null = all sports
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  venue       Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport       Sport?       @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  memberships Membership[]
+}
+
+enum MembershipStatus {
+  ACTIVE
+  CANCELLED
+}
+
+// startDate/endDate are venue-local dates ('YYYY-MM-DD', inclusive). Expiry is derived from endDate.
+model Membership {
+  id          String           @id @default(cuid())
+  venueId     String
+  playerId    String
+  planId      String
+  startDate   String
+  endDate     String
+  price       Decimal          @db.Decimal(10, 2)
+  status      MembershipStatus @default(ACTIVE)
+  cancelledAt DateTime?
+  createdById String?
+  createdAt   DateTime         @default(now())
+
+  venue    Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  player   Player         @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  plan     MembershipPlan @relation(fields: [planId], references: [id])
+  payments Payment[]
+  bookings Booking[]
+
+  @@index([venueId, endDate])
+  @@index([playerId])
+}
+
+enum ClassStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum FeePeriod {
+  MONTH
+  TERM
+}
+
+// A recurring coaching class. Each session is materialised as CourtBlock rows
+// (one per court per class day), so courts are reserved with the same
+// no-overlap guarantee as bookings.
+model Class {
+  id          String      @id @default(cuid())
+  venueId     String
+  name        String
+  coachName   String?
+  sportId     String?
+  courtIds    String[]
+  days        DayOfWeek[]
+  startMin    Int // minutes after local midnight
+  endMin      Int
+  startDate   String // venue-local 'YYYY-MM-DD', inclusive
+  endDate     String
+  capacity    Int?
+  fee         Decimal     @db.Decimal(10, 2)
+  feePeriod   FeePeriod   @default(MONTH)
+  status      ClassStatus @default(ACTIVE)
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  venue       Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport       Sport?       @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  sessions    CourtBlock[]
+  enrollments Enrollment[]
+
+  @@index([venueId, status])
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  WITHDRAWN
+}
+
+model Enrollment {
+  id          String           @id @default(cuid())
+  venueId     String
+  classId     String
+  playerId    String
+  status      EnrollmentStatus @default(ACTIVE)
+  withdrawnAt DateTime?
+  createdById String?
+  createdAt   DateTime         @default(now())
+
+  class    Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  player   Player    @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@unique([classId, playerId])
+  @@index([venueId])
 }
 
 // ─── Password Reset OTP ──────────────────────────────────────────────────────

@@ -22,16 +22,22 @@ export type MetricBooking = {
   amount: number
 }
 
+export type RevenueCategory = 'BOOKING' | 'MEMBERSHIP' | 'CLASS'
+
 export type MetricPayment = {
-  bookingId: string
+  category: RevenueCategory
+  bookingId: string | null
   kind: 'PAYMENT' | 'REFUND'
   amount: number
   receivedAt: Date
-  courtId: string
+  // Only set for booking payments
+  courtId: string | null
   sportId: string | null
   sportName: string | null
-  source: string
+  source: string | null
 }
+
+export const CATEGORY_LABELS: Record<RevenueCategory, string> = { BOOKING: 'Court bookings', MEMBERSHIP: 'Memberships', CLASS: 'Classes' }
 
 export type MetricCourt = { id: string; name: string; sportId: string | null; isActive: boolean }
 
@@ -140,11 +146,16 @@ export function computeMetrics(opts: {
     src.gross += b.amount
     src.bookings++
   }
+  const byType = new Map<string, Agg>((['BOOKING', 'MEMBERSHIP', 'CLASS'] as const).map((k) => [k, { key: k, name: CATEGORY_LABELS[k], gross: 0, collected: 0, bookings: 0 }]))
   for (const p of payments) {
     const sign = p.kind === 'PAYMENT' ? 1 : -1
+    const t = byType.get(p.category)!
+    t.collected += sign * p.amount
+    t.bookings += p.kind === 'PAYMENT' ? 1 : 0 // number of payments
+    if (p.category !== 'BOOKING' || !p.courtId) continue // sport/court/source breakdowns are about court time
     bump(bySport, p.sportId ?? `name:${p.sportName ?? 'Unspecified'}`, p.sportName ?? 'Unspecified').collected += sign * p.amount
     bump(byCourt, p.courtId, courtName.get(p.courtId) ?? 'Removed court').collected += sign * p.amount
-    bump(bySource, p.source, p.source).collected += sign * p.amount
+    bump(bySource, p.source ?? 'OTHER', p.source ?? 'OTHER').collected += sign * p.amount
   }
   const finish = (m: Map<string, Agg>) =>
     [...m.values()].map((a) => ({ ...a, gross: r2(a.gross), collected: r2(a.collected) })).sort((x, y) => y.gross - x.gross)
@@ -182,6 +193,8 @@ export function computeMetrics(opts: {
       occupancy: openByCourt.get(c.key) ? Math.min(1, (bookedByCourt.get(c.key) ?? 0) / openByCourt.get(c.key)!) : null,
     })),
     bySource: finish(bySource),
+    /** Collected revenue split into court bookings, memberships and classes ("bookings" = number of payments). */
+    byType: [...byType.values()].map((a) => ({ ...a, collected: r2(a.collected) })),
     channel,
   }
 }

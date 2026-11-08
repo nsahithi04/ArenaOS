@@ -22,7 +22,7 @@ type Metrics = {
   pending: { count: number; outstanding: number | null };
   occupancy: number | null; bookedHours: number; openHours: number;
   trend: { date: string; gross: number | null; collected: number | null; bookings: number; cancelled: number; online: number; offline: number }[];
-  bySport: Agg[]; byCourt: CourtRow[]; bySource: Agg[];
+  bySport: Agg[]; byCourt: CourtRow[]; bySource: Agg[]; byType: Agg[];
   channel: Record<"online" | "offline" | "other", { bookings: number; gross: number | null }>;
 };
 type Dashboard = {
@@ -182,10 +182,10 @@ export function DashboardScreen() {
           {/* Primary stats */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard icon={DollarSign} label="Collected Revenue" value={money(m.collected, cur)}
-              sub={rev ? `Money received ${money(m.paymentsReceived, cur)} − refunds ${money(m.refunds, cur)}` : "Requires reports access"}
+              sub={rev ? `Bookings, memberships & classes · refunds ${money(m.refunds, cur)}` : "Requires reports access"}
               delta={change(m.collected, data.previous.collected)} color="#16a34a"
               onClick={() => setDetail({ kind: "payments", title: `Collected revenue · ${rangeLabel}`, params: {},
-                explain: <>Money actually received in this period: payments of <b>{money(m.paymentsReceived, cur)}</b> minus refunds of <b>{money(m.refunds, cur)}</b> = <b>{money(m.collected, cur)}</b>. It counts the day the money came in, not the day the booking is played.</> })} />
+                explain: <>Money actually received in this period, from court bookings, memberships and class fees: payments of <b>{money(m.paymentsReceived, cur)}</b> minus refunds of <b>{money(m.refunds, cur)}</b> = <b>{money(m.collected, cur)}</b>. It counts the day the money came in, not the day the booking is played.</> })} />
             <StatCard icon={TrendingUp} label="Today's Revenue" value={money(data.today_.collected, cur)}
               sub={rev ? `Collected today · ${money(data.today_.gross, cur)} of bookings today (${data.today_.bookings})` : undefined} color="#2563eb"
               onClick={() => setDetail({ kind: "payments", title: `Today's revenue · ${dayLabel(data.today)}`, params: { date: data.today },
@@ -270,7 +270,33 @@ export function DashboardScreen() {
           </div>
 
           {/* Breakdowns */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {rev && (
+              <div className="bg-white rounded-xl border border-border p-5">
+                <h3 className="font-medium text-foreground mb-4">Revenue by Type</h3>
+                <ul className="space-y-3">
+                  {m.byType.map((t) => {
+                    const max = Math.max(1, ...m.byType.map((x) => Math.abs(x.collected ?? 0)))
+                    return (
+                      <li key={t.key}>
+                        <button type="button" className="w-full text-left rounded-lg -mx-1.5 px-1.5 py-1 hover:bg-muted/40 transition-colors"
+                          onClick={() => setDetail({ kind: "payments", title: `${t.name} · ${rangeLabel}`, params: { category: t.key },
+                            explain: <>Money collected for <b>{t.name.toLowerCase()}</b> in this period, net of refunds: <b>{money(t.collected, cur)}</b>.</> })}>
+                          <div className="flex items-baseline justify-between text-sm mb-1 gap-2">
+                            <span className="text-foreground">{t.name}</span>
+                            <span className="font-medium text-foreground">{money(t.collected, cur)}</span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${(Math.max(0, t.collected ?? 0) / max) * 100}%`, background: t.key === "MEMBERSHIP" ? "#7c3aed" : t.key === "CLASS" ? "#0891b2" : "#16a34a" }} />
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">{t.bookings} payment{t.bookings === 1 ? "" : "s"}</p>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
             <Breakdown title="Revenue by Sport" rows={m.bySport} currency={cur} rev={rev}
               onPick={(r) => setDetail({ kind: "bookings", title: `${r.name} · ${rangeLabel}`,
                 params: r.key.startsWith("name:") ? { sportName: r.key.slice(5) } : { sportId: r.key },

@@ -20,6 +20,8 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
   - occupancy, pending payments, cancellations
   - online vs offline split, revenue by sport and by court, trends
   - date ranges: today, this week, this month or custom
+- **Memberships:** monthly or yearly plans (optionally for one sport) sold at the front desk, with full or partial payment. Members play free: staff pick "Member" when booking a walk-in or phone call, and the court time is covered as long as the membership is valid on that date.
+- **Classes:** coaching or group classes with a coach, courts, days, times and a term. Every session reserves its courts automatically, using the same no-overlap protection as bookings. Clashes with existing bookings are listed before anything is saved. Includes enrolment with capacity limits and per-month or per-term fees.
 - **Team and permissions:** three levels, enforced on the server:
   | | Owner | Manager | Employee |
   |---|---|---|---|
@@ -59,11 +61,15 @@ components/
   bookings/          bookings screen, booking form, details panel, shared client helpers
   calendar/          booking calendar (day / week / month)
   dashboard/         dashboard screen
+  members/           members and membership plans
+  classes/           coaching classes and enrolments
+  club/              player picker shared by members, classes and bookings
   settings/          account, team and roles settings
   brand/             logo
 hooks/               client hooks (use-permissions)
 lib/
   team/              built-in roles (Manager, Employee) and team rules
+  club/              memberships, classes, enrolments, schedules
   booking/           booking engine: time zones, pricing, availability, validation,
                      access control, service (transactions), queries, dashboard metrics
   db.ts, mail.ts, cloudinary.ts, permissions.ts, slug.ts

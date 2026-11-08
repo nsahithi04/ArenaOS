@@ -48,6 +48,7 @@ async function main() {
   if (venueIds.length) {
     await prisma.payment.deleteMany({ where: { venueId: { in: venueIds } } })
     await prisma.booking.deleteMany({ where: { venueId: { in: venueIds } } })
+    await prisma.membership.deleteMany({ where: { venueId: { in: venueIds } } })
     await prisma.walkInBooking.deleteMany({ where: { venueId: { in: venueIds } } })
     await prisma.pricingRule.deleteMany({ where: { venueId: { in: venueIds } } })
     await prisma.venue.deleteMany({ where: { id: { in: venueIds } } }) // cascades courts, sports, hours, blocks, roles, members, images
@@ -118,7 +119,66 @@ async function main() {
     if (method) await prisma.payment.create({ data: { bookingId: b.id, venueId: venue.id, kind: 'PAYMENT', method, amount, recordedById: owner.id, receivedAt: at(date, start) } })
   }
   await prisma.courtBlock.create({ data: { venueId: venue.id, courtId: courts[1].id, startTime: at(localDate(0), 14 * 60), endTime: at(localDate(0), 16 * 60), reason: 'Net repair', createdById: owner.id } })
-  console.log(`Demo venue ready in local database "${db}" (${plan.length} bookings, today = ${localDate(0)} ${TZ})`)
+  // ── Memberships ─────────────────────────────────────────────────────────
+  const monthly = await prisma.membershipPlan.create({ data: { venueId: venue.id, name: 'Monthly Unlimited', durationMonths: 1, price: 99, description: 'Play any sport, any time the courts are free' } })
+  const annual = await prisma.membershipPlan.create({ data: { venueId: venue.id, name: 'Annual Unlimited', durationMonths: 12, price: 999 } })
+  await prisma.membershipPlan.create({ data: { venueId: venue.id, name: 'Pickleball Monthly', durationMonths: 1, price: 69, sportId: pickle.id } })
+  const endOf = (start, months) => {
+    const [y, m, d] = start.split('-').map(Number)
+    const t = new Date(Date.UTC(y, m - 1 + months, d))
+    if (t.getUTCDate() !== d) return new Date(Date.UTC(y, m - 1 + months + 1, 0)).toISOString().slice(0, 10)
+    return new Date(Date.UTC(y, m - 1 + months, d - 1)).toISOString().slice(0, 10)
+  }
+  const members = [
+    ['Priya Nair', '+1 480 555 0201', monthly, localDate(-10), 99],
+    ['Marcus Bell', '+1 480 555 0202', annual, localDate(-40), 999],
+    ['Hana Sato', '+1 480 555 0203', monthly, localDate(-2), 50], // still owes 49
+  ]
+  const memberships = []
+  for (const [name, phone, plan, start, paid] of members) {
+    const player = await prisma.player.create({ data: { venueId: venue.id, name, phone } })
+    const ms = await prisma.membership.create({
+      data: { venueId: venue.id, playerId: player.id, planId: plan.id, startDate: start, endDate: endOf(start, plan.durationMonths), price: plan.price, createdById: owner.id },
+    })
+    await prisma.payment.create({ data: { venueId: venue.id, membershipId: ms.id, method: 'UPI', amount: paid, receivedAt: at(start, 10 * 60), recordedById: owner.id } })
+    memberships.push({ ms, player })
+  }
+  // A member booking tomorrow morning, covered by Priya's membership
+  await prisma.booking.create({
+    data: {
+      venueId: venue.id, courtId: courts[0].id, sportId: pickle.id, sport: 'Pickleball', customer: 'Priya Nair', phone: '+1 480 555 0201',
+      source: 'PHONE', startTime: at(localDate(1), 7 * 60), endTime: at(localDate(1), 8 * 60), amountUsd: 0, payment: 'PAID', status: 'CONFIRMED',
+      createdById: owner.id, playerId: memberships[0].player.id, membershipId: memberships[0].ms.id,
+    },
+  })
+
+  // ── A coaching class: Mon & Wed 4–5:30 PM on Pickle 2 for 8 weeks ───────
+  const cls = await prisma.class.create({
+    data: {
+      venueId: venue.id, name: 'Junior Pickleball', coachName: 'Maria Rivera', sportId: pickle.id, courtIds: [courts[1].id],
+      days: ['MONDAY', 'WEDNESDAY'], startMin: 16 * 60, endMin: 17 * 60 + 30, startDate: localDate(0), endDate: localDate(55),
+      capacity: 8, fee: 120, feePeriod: 'MONTH', createdById: owner.id,
+    },
+  })
+  let sessions = 0
+  for (let i = 0; i <= 55; i++) {
+    const d = localDate(i)
+    const dow = new Date(`${d}T00:00:00Z`).getUTCDay() // 1 = Mon, 3 = Wed
+    if (dow !== 1 && dow !== 3) continue
+    const start = at(d, 16 * 60), end = at(d, 17 * 60 + 30)
+    const clash = await prisma.booking.count({ where: { courtId: courts[1].id, status: { not: 'CANCELLED' }, startTime: { lt: end }, endTime: { gt: start } } })
+      + await prisma.courtBlock.count({ where: { courtId: courts[1].id, startTime: { lt: end }, endTime: { gt: start } } })
+    if (clash) continue
+    await prisma.courtBlock.create({ data: { venueId: venue.id, courtId: courts[1].id, startTime: start, endTime: end, classId: cls.id, reason: 'Class: Junior Pickleball', createdById: owner.id } })
+    sessions++
+  }
+  for (const [name, paid] of [['Leo Park', 120], ['Ava Singh', 120], ['Noah Kim', 0]]) {
+    const player = await prisma.player.create({ data: { venueId: venue.id, name } })
+    const e = await prisma.enrollment.create({ data: { venueId: venue.id, classId: cls.id, playerId: player.id, createdById: owner.id } })
+    if (paid) await prisma.payment.create({ data: { venueId: venue.id, enrollmentId: e.id, method: 'CASH', amount: paid, recordedById: owner.id } })
+  }
+
+  console.log(`Demo venue ready in local database "${db}" (${plan.length} bookings, ${members.length} members, 1 class with ${sessions} sessions, today = ${localDate(0)} ${TZ})`)
 }
 
 main().finally(() => prisma.$disconnect())

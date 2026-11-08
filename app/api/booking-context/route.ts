@@ -23,6 +23,7 @@ export async function GET(req: Request) {
         canEditBookings: hasPermission(ctx.access, 'bookings', 'edit'),
         canRefund: hasPermission(ctx.access, 'billing', 'edit'),
         canViewReports: hasPermission(ctx.access, 'reports', 'view'),
+        canManageVenue: hasPermission(ctx.access, 'venue', 'edit'),
       },
     })
   } catch (err) {

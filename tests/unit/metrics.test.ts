@@ -8,7 +8,8 @@ const bk = (o: Partial<MetricBooking> & { id: string }): MetricBooking => ({
   courtId: 'c1', sportId: 's1', sportName: 'Pickleball', source: 'PHONE', status: 'CONFIRMED',
   startTime: at('2026-11-05', 10), endTime: at('2026-11-05', 11), amount: 20, ...o,
 })
-const pay = (o: Partial<MetricPayment> & { bookingId: string; amount: number }): MetricPayment => ({
+const pay = (o: Partial<MetricPayment> & { bookingId: string | null; amount: number }): MetricPayment => ({
+  category: 'BOOKING',
   kind: 'PAYMENT', receivedAt: at('2026-11-05', 12), courtId: 'c1', sportId: 's1', sportName: 'Pickleball', source: 'PHONE', ...o,
 })
 
@@ -69,6 +70,23 @@ describe('computeMetrics', () => {
     ])
     expect(m.byCourt.find((c) => c.key === 'c2')).toMatchObject({ gross: 30, collected: 10, bookings: 1 })
     expect(m.channel).toEqual({ online: { bookings: 1, gross: 30 }, offline: { bookings: 2, gross: 60 }, other: { bookings: 0, gross: 0 } })
+  })
+
+  it('splits collected revenue by type and keeps court breakdowns to court bookings', () => {
+    const r = computeMetrics({
+      tz: TZ, from: '2026-11-05', to: '2026-11-05', bookings: [], netPaidByBooking: new Map(), hours: [],
+      courts: [{ id: 'c1', name: 'Court 1', sportId: 's1', isActive: true }],
+      payments: [
+        pay({ bookingId: 'a', amount: 20 }),
+        pay({ category: 'MEMBERSHIP', bookingId: null, courtId: null, sportId: null, sportName: null, source: null, amount: 99 }),
+        pay({ category: 'CLASS', bookingId: null, courtId: null, sportId: null, sportName: null, source: null, amount: 50 }),
+        pay({ category: 'CLASS', bookingId: null, courtId: null, sportId: null, sportName: null, source: null, amount: 10, kind: 'REFUND' }),
+      ],
+    })
+    expect(r.collected).toBe(159)
+    expect(r.byType.map((t) => [t.key, t.collected])).toEqual([['BOOKING', 20], ['MEMBERSHIP', 99], ['CLASS', 40]])
+    expect(r.byCourt.find((c) => c.key === 'c1')?.collected).toBe(20)
+    expect(r.bySport.reduce((s, x) => s + (x.collected ?? 0), 0)).toBe(20)
   })
 
   it('returns null occupancy when no hours are configured', () => {

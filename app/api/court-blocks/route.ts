@@ -19,13 +19,17 @@ export async function GET(req: Request) {
     const blocks = await prisma.courtBlock.findMany({
       where: { venueId: ctx.access.venueId, startTime: { lt: end }, endTime: { gt: start } },
       orderBy: { startTime: 'asc' },
-      take: 2000,
+      take: 5000,
+      include: { class: { select: { name: true, coachName: true } } },
     })
     return NextResponse.json(
       blocks.map((b) => ({
         id: b.id,
         courtId: b.courtId,
         reason: b.reason,
+        classId: b.classId,
+        className: b.class?.name ?? null,
+        coachName: b.class?.coachName ?? null,
         start: b.startTime.toISOString(),
         end: b.endTime.toISOString(),
         date: localDateOf(b.startTime, venue.timezone),
