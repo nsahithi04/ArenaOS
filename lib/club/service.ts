@@ -19,7 +19,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 
 // ─── Players ────────────────────────────────────────────────────────────────
 
-async function resolvePlayer(tx: Tx, venueId: string, ref: PlayerRef) {
+export async function resolvePlayer(tx: Tx, venueId: string, ref: PlayerRef) {
   if ('playerId' in ref) {
     const p = await tx.player.findFirst({ where: { id: ref.playerId, venueId } })
     if (!p) throw new ServiceError(404, 'PLAYER_NOT_FOUND', 'Player not found')
@@ -30,7 +30,7 @@ async function resolvePlayer(tx: Tx, venueId: string, ref: PlayerRef) {
 
 // ─── Plans ──────────────────────────────────────────────────────────────────
 
-async function assertSport(db: PrismaClient | Tx, venueId: string, sportId: string | null | undefined) {
+export async function assertSport(db: PrismaClient | Tx, venueId: string, sportId: string | null | undefined) {
   if (!sportId) return
   const s = await db.sport.findFirst({ where: { id: sportId, venueId }, select: { id: true } })
   if (!s) throw new ServiceError(422, 'SPORT_NOT_FOUND', 'Sport not found for this venue')
@@ -135,7 +135,10 @@ function buildSessions(cls: { courtIds: string[]; days: string[]; startMin: numb
 
 export type SessionConflict = { date: string; courtId: string; courtName: string; what: string; time: string }
 
-async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: string, excludeClassId?: string): Promise<SessionConflict[]> {
+/** What a reserved court block belongs to. */
+export type BlockOwner = { classId: string } | { tournamentId: string }
+
+async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: string, exclude?: BlockOwner): Promise<SessionConflict[]> {
   if (!sessions.length) return []
   const min = new Date(Math.min(...sessions.map((s) => +s.start)))
   const max = new Date(Math.max(...sessions.map((s) => +s.end)))
@@ -146,7 +149,7 @@ async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: s
       select: { courtId: true, startTime: true, endTime: true, customer: true },
     }),
     tx.courtBlock.findMany({
-      where: { venueId, courtId: { in: courtIds }, startTime: { lt: max }, endTime: { gt: min }, ...(excludeClassId && { NOT: { classId: excludeClassId } }) },
+      where: { venueId, courtId: { in: courtIds }, startTime: { lt: max }, endTime: { gt: min }, ...(exclude && { NOT: exclude }) },
       select: { courtId: true, startTime: true, endTime: true, reason: true },
     }),
     tx.court.findMany({ where: { id: { in: courtIds } }, select: { id: true, name: true } }),
@@ -169,25 +172,30 @@ async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: s
   return out
 }
 
-async function validateCourts(db: PrismaClient | Tx, venueId: string, courtIds: string[]) {
+export async function validateCourts(db: PrismaClient | Tx, venueId: string, courtIds: string[]) {
   const courts = await db.court.findMany({ where: { id: { in: courtIds }, venueId, isActive: true }, select: { id: true } })
   if (courts.length !== courtIds.length) throw new ServiceError(422, 'COURT_NOT_FOUND', 'One or more courts are not active courts of this venue')
 }
 
 /** Replace a class's future sessions (from `fromDate`) with ones matching its current schedule. */
-async function writeSessions(tx: Tx, venueId: string, classId: string, cls: Parameters<typeof buildSessions>[0] & { name: string }, tz: string, fromDate: string, skipConflicts: boolean, actorId: string) {
-  const sessions = buildSessions(cls, tz, fromDate)
-  await lockCourts(tx, [...new Set(cls.courtIds)])
+/**
+ * Replace the future court reservations of a class or tournament (from `fromDate`)
+ * with ones matching its schedule. Takes the per-court locks, reports clashes
+ * (409 with the list) unless `skipConflicts`, then writes the CourtBlock rows.
+ */
+export async function reserveSessions(tx: Tx, venueId: string, owner: BlockOwner, spec: Parameters<typeof buildSessions>[0], label: string, tz: string, fromDate: string, skipConflicts: boolean, actorId: string) {
+  const sessions = buildSessions(spec, tz, fromDate)
+  await lockCourts(tx, [...new Set(spec.courtIds)])
   const fromInstant = zonedToUtc(fromDate, 0, tz)
-  await tx.courtBlock.deleteMany({ where: { classId, startTime: { gte: fromInstant } } })
-  const conflicts = await findConflicts(tx, venueId, sessions, tz, classId)
+  await tx.courtBlock.deleteMany({ where: { ...owner, startTime: { gte: fromInstant } } })
+  const conflicts = await findConflicts(tx, venueId, sessions, tz, owner)
   if (conflicts.length && !skipConflicts) {
     throw new ConflictError(`${conflicts.length} session${conflicts.length === 1 ? '' : 's'} clash with existing bookings or blocks.`, { conflicts: conflicts.slice(0, 100) })
   }
   const clash = new Set(conflicts.map((c) => `${c.date}|${c.courtId}`))
   const rows = sessions
     .filter((s) => !clash.has(`${s.date}|${s.courtId}`))
-    .map((s) => ({ venueId, courtId: s.courtId, startTime: s.start, endTime: s.end, classId, reason: `Class: ${cls.name}`, createdById: actorId }))
+    .map((s) => ({ venueId, courtId: s.courtId, startTime: s.start, endTime: s.end, ...owner, reason: label, createdById: actorId }))
   if (rows.length) await tx.courtBlock.createMany({ data: rows })
   return { sessions: rows.length, skipped: clash.size }
 }
@@ -212,7 +220,7 @@ export async function createClass(db: PrismaClient, venueId: string, actorId: st
           capacity: input.capacity ?? null, fee: dec(input.fee), feePeriod: input.feePeriod ?? 'MONTH', createdById: actorId,
         },
       })
-      const r = await writeSessions(tx, venueId, cls.id, cls, venue.timezone, today, input.skipConflicts, actorId)
+      const r = await reserveSessions(tx, venueId, { classId: cls.id }, cls, `Class: ${cls.name}`, venue.timezone, today, input.skipConflicts, actorId)
       return { id: cls.id, ...r }
     }, { timeout: 20_000 })
   } catch (err) {
@@ -244,7 +252,7 @@ export async function updateClass(db: PrismaClient, venueId: string, actorId: st
       })
       // Past sessions are history; only today onward is rewritten.
       if (scheduleChanged) {
-        const r = await writeSessions(tx, venueId, cls.id, next, venue.timezone, todayIn(venue.timezone), input.skipConflicts, actorId)
+        const r = await reserveSessions(tx, venueId, { classId: cls.id }, next, `Class: ${next.name}`, venue.timezone, todayIn(venue.timezone), input.skipConflicts, actorId)
         return { id: cls.id, ...r }
       }
       if (input.name) await tx.courtBlock.updateMany({ where: { classId: cls.id }, data: { reason: `Class: ${input.name}` } })

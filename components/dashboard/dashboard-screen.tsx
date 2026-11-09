@@ -287,7 +287,7 @@ export function DashboardScreen() {
                             <span className="font-medium text-foreground">{money(t.collected, cur)}</span>
                           </div>
                           <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${(Math.max(0, t.collected ?? 0) / max) * 100}%`, background: t.key === "MEMBERSHIP" ? "#7c3aed" : t.key === "CLASS" ? "#0891b2" : "#16a34a" }} />
+                            <div className="h-full rounded-full" style={{ width: `${(Math.max(0, t.collected ?? 0) / max) * 100}%`, background: t.key === "MEMBERSHIP" ? "#7c3aed" : t.key === "CLASS" ? "#0891b2" : t.key === "TOURNAMENT" ? "#d97706" : "#16a34a" }} />
                           </div>
                           <p className="text-[11px] text-muted-foreground mt-0.5">{t.bookings} payment{t.bookings === 1 ? "" : "s"}</p>
                         </button>

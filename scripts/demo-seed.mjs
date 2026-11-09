@@ -178,7 +178,31 @@ async function main() {
     if (paid) await prisma.payment.create({ data: { venueId: venue.id, enrollmentId: e.id, method: 'CASH', amount: paid, recordedById: owner.id } })
   }
 
-  console.log(`Demo venue ready in local database "${db}" (${plan.length} bookings, ${members.length} members, 1 class with ${sessions} sessions, today = ${localDate(0)} ${TZ})`)
+  // ── A tournament two weekends out, registration open (make the draw in the app) ──
+  const tStart = localDate(14), tEnd = localDate(15)
+  const tour = await prisma.tournament.create({
+    data: {
+      venueId: venue.id, name: 'Fall Classic', description: 'Singles knockout, best of 3 games to 11.', sportId: pickle.id,
+      courtIds: [courts[0].id, courts[1].id], startDate: tStart, endDate: tEnd, startMin: 9 * 60, endMin: 18 * 60,
+      entryType: 'SINGLES', maxEntrants: 16, entryFee: 25,
+      prizes: [{ label: 'Winner', amount: 300, paid: false }, { label: 'Runner-up', amount: 150, paid: false }, { label: 'Semi-finalists', amount: 50, paid: false }],
+      createdById: owner.id,
+    },
+  })
+  for (const d of [tStart, tEnd]) {
+    for (const c of [courts[0], courts[1]]) {
+      await prisma.courtBlock.create({ data: { venueId: venue.id, courtId: c.id, startTime: at(d, 9 * 60), endTime: at(d, 18 * 60), tournamentId: tour.id, reason: 'Tournament: Fall Classic', createdById: owner.id } })
+    }
+  }
+  const entries = [['Priya Nair', 1, 25], ['Marcus Bell', 2, 25], ['Hana Sato', null, 25], ['Leo Park', null, 25], ['Omar Haddad', null, 25], ['Grace Liu', null, 0]]
+  for (const [name, seed, paid] of entries) {
+    const existing = await prisma.player.findFirst({ where: { venueId: venue.id, name } })
+    const player = existing ?? await prisma.player.create({ data: { venueId: venue.id, name } })
+    const e = await prisma.tournamentEntrant.create({ data: { tournamentId: tour.id, venueId: venue.id, name, playerId: player.id, phone: player.phone, seed, createdById: owner.id } })
+    if (paid) await prisma.payment.create({ data: { venueId: venue.id, tournamentEntryId: e.id, method: 'CASH', amount: paid, recordedById: owner.id } })
+  }
+
+  console.log(`Demo venue ready in local database "${db}" (${plan.length} bookings, ${members.length} members, 1 class with ${sessions} sessions, 1 tournament (${entries.length} entries), today = ${localDate(0)} ${TZ})`)
 }
 
 main().finally(() => prisma.$disconnect())

@@ -57,6 +57,8 @@ export type CourtBlock = {
   id: string; courtId: string; reason: string | null; start: string; end: string; date: string; startMin: number; endMin: number
   /** Set when the block is a coaching-class session */
   classId: string | null; className: string | null; coachName: string | null
+  /** Set when the block reserves the court for a tournament */
+  tournamentId: string | null; tournamentName: string | null
 }
 
 export type HoursRow = { sportId: string | null; day: string; openTime: string; closeTime: string; isClosed: boolean }

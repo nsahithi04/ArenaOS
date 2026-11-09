@@ -22,7 +22,7 @@ export type MetricBooking = {
   amount: number
 }
 
-export type RevenueCategory = 'BOOKING' | 'MEMBERSHIP' | 'CLASS'
+export type RevenueCategory = 'BOOKING' | 'MEMBERSHIP' | 'CLASS' | 'TOURNAMENT'
 
 export type MetricPayment = {
   category: RevenueCategory
@@ -37,7 +37,7 @@ export type MetricPayment = {
   source: string | null
 }
 
-export const CATEGORY_LABELS: Record<RevenueCategory, string> = { BOOKING: 'Court bookings', MEMBERSHIP: 'Memberships', CLASS: 'Classes' }
+export const CATEGORY_LABELS: Record<RevenueCategory, string> = { BOOKING: 'Court bookings', MEMBERSHIP: 'Memberships', CLASS: 'Classes', TOURNAMENT: 'Tournaments' }
 
 export type MetricCourt = { id: string; name: string; sportId: string | null; isActive: boolean }
 
@@ -146,7 +146,7 @@ export function computeMetrics(opts: {
     src.gross += b.amount
     src.bookings++
   }
-  const byType = new Map<string, Agg>((['BOOKING', 'MEMBERSHIP', 'CLASS'] as const).map((k) => [k, { key: k, name: CATEGORY_LABELS[k], gross: 0, collected: 0, bookings: 0 }]))
+  const byType = new Map<string, Agg>((['BOOKING', 'MEMBERSHIP', 'CLASS', 'TOURNAMENT'] as const).map((k) => [k, { key: k, name: CATEGORY_LABELS[k], gross: 0, collected: 0, bookings: 0 }]))
   for (const p of payments) {
     const sign = p.kind === 'PAYMENT' ? 1 : -1
     const t = byType.get(p.category)!

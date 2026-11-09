@@ -19,7 +19,7 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
     db.payment.findMany({
       where: { venueId, receivedAt: { gte: start, lt: end } },
       select: {
-        bookingId: true, membershipId: true, enrollmentId: true, kind: true, amount: true, receivedAt: true,
+        bookingId: true, membershipId: true, enrollmentId: true, tournamentEntryId: true, kind: true, amount: true, receivedAt: true,
         booking: { select: { courtId: true, sportId: true, sport: true, source: true, sportRef: { select: { name: true } } } },
       },
     }),
@@ -42,7 +42,7 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
       status: b.status, startTime: b.startTime, endTime: b.endTime, amount: Number(b.amountUsd),
     })),
     payments: payments.map<MetricPayment>((p) => ({
-      category: p.bookingId ? 'BOOKING' : p.membershipId ? 'MEMBERSHIP' : 'CLASS',
+      category: p.bookingId ? 'BOOKING' : p.membershipId ? 'MEMBERSHIP' : p.enrollmentId ? 'CLASS' : 'TOURNAMENT',
       bookingId: p.bookingId, kind: p.kind, amount: Number(p.amount), receivedAt: p.receivedAt,
       courtId: p.booking?.courtId ?? null, sportId: p.booking?.sportId ?? null,
       sportName: p.booking ? p.booking.sportRef?.name ?? p.booking.sport : null, source: p.booking?.source ?? null,

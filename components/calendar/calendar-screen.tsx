@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Plus, Wrench, User, Clock, CalendarPlus, GraduationCap } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Wrench, User, Clock, CalendarPlus, GraduationCap, Trophy } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   addDays, api, ApiError, BRAND_GRADIENT, clockToMin, ConfirmDialog, dayName, ErrorState, fmtDate, fmtDuration, fmtTime, hhmm,
@@ -17,6 +17,7 @@ type StatusFilter = "all" | BookingStatus | "walkin";
 const SLOT_HEIGHT = 56; // px per hour
 const MAINT = { bg: "#f8fafc", border: "#cbd5e1", text: "#475569", label: "Maintenance" };
 const CLASS_STYLE = { bg: "#f5f3ff", border: "#a78bfa", text: "#6d28d9", label: "Class" };
+const TOURNAMENT_STYLE = { bg: "#fffbeb", border: "#f59e0b", text: "#b45309", label: "Tournament" };
 
 type Column = { key: string; date: string; courtId: string; courtName: string; dayLabel?: string; groupStart?: boolean };
 
@@ -179,6 +180,7 @@ export function CalendarScreen() {
   const legend: [string, { bg: string; border: string; label: string }][] = [
     ...(["CONFIRMED", "PENDING", "CHECKED_IN", "COMPLETED"] as BookingStatus[]).map((s) => [s, STATUS[s]] as [string, typeof STATUS[BookingStatus]]),
     ["class", CLASS_STYLE],
+    ["tournament", TOURNAMENT_STYLE],
     ["maintenance", MAINT],
   ];
 
@@ -320,6 +322,22 @@ export function CalendarScreen() {
                     {colBlocks.map((bl) => {
                       const top = ((bl.startMin - gridStart) / 60) * SLOT_HEIGHT;
                       const height = ((bl.endMin - bl.startMin) / 60) * SLOT_HEIGHT - 4;
+                      if (bl.tournamentId) {
+                        return (
+                          <div key={bl.id} onClick={() => router.push(`/tournaments/${bl.tournamentId}`)} title={bl.tournamentName ?? "Tournament"}
+                            className="absolute left-1 right-1 rounded-lg border overflow-hidden z-10 cursor-pointer hover:shadow-md"
+                            style={{ top: top + 2, height: Math.max(height, 18), background: TOURNAMENT_STYLE.bg, borderColor: TOURNAMENT_STYLE.border }}>
+                            <div className="w-1 absolute left-0 top-0 bottom-0" style={{ background: TOURNAMENT_STYLE.border }} />
+                            <div className="pl-2.5 pr-2 py-1">
+                              <div className="flex items-center gap-1">
+                                <Trophy size={11} style={{ color: TOURNAMENT_STYLE.text }} />
+                                <span className="text-xs font-semibold truncate" style={{ color: TOURNAMENT_STYLE.text }}>{bl.tournamentName}</span>
+                              </div>
+                              {height > 40 && <span className="text-xs opacity-80 block truncate" style={{ color: TOURNAMENT_STYLE.text }}>{fmtTime(bl.startMin)} – {fmtTime(bl.endMin)}</span>}
+                            </div>
+                          </div>
+                        );
+                      }
                       if (bl.classId) {
                         // Coaching class session: open the class instead of offering to delete the block.
                         return (

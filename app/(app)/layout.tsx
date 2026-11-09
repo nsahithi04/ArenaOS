@@ -20,6 +20,7 @@ import {
   LogOut,
   BadgeCheck,
   GraduationCap,
+  Trophy,
 } from "lucide-react";
 
 const navItems = [
@@ -28,6 +29,7 @@ const navItems = [
   { href: "/bookings", label: "Bookings", icon: BookOpen },
   { href: "/members", label: "Members", icon: BadgeCheck },
   { href: "/classes", label: "Classes", icon: GraduationCap },
+  { href: "/tournaments", label: "Tournaments", icon: Trophy },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -112,7 +114,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             .filter((item) => {
               // Dashboard (revenue/stats) is for owners and managers; calendar and bookings for anyone with bookings access.
               if (item.href === "/dashboard") return canView("reports");
-              if (["/calendar", "/bookings", "/members", "/classes"].includes(item.href)) return canView("bookings");
+              if (["/calendar", "/bookings", "/members", "/classes", "/tournaments"].includes(item.href)) return canView("bookings");
               return true;
             })
             .map((item) => {

@@ -161,6 +161,7 @@ model Venue {
   memberships     Membership[]
   classes         Class[]
   venueRoles      VenueRole[]
+  tournaments     Tournament[]
   venueMembers    VenueMember[]
 }
 
@@ -248,6 +249,8 @@ model Sport {
   bookings        Booking[]
   membershipPlans MembershipPlan[]
   classes         Class[]
+
+  tournaments Tournament[]
 
   @@unique([venueId, name])
 }
@@ -406,53 +409,59 @@ model Booking {
 
 // Money actually received (PAYMENT) or returned (REFUND) for a booking.
 // Collected revenue is computed from these rows, never from Booking.amountUsd.
-// Exactly one of bookingId / membershipId / enrollmentId is set
-// ("Payment_one_target" check constraint in migration 3_memberships_classes).
+// Exactly one of bookingId / membershipId / enrollmentId / tournamentEntryId is set
+// ("Payment_one_target" check constraint, last updated in migration 4_tournaments).
 model Payment {
-  id           String        @id @default(cuid())
-  bookingId    String?
-  membershipId String?
-  enrollmentId String?
-  venueId      String
-  kind         PaymentKind   @default(PAYMENT)
-  method       PaymentMethod
-  amount       Decimal       @db.Decimal(10, 2)
-  receivedAt   DateTime      @default(now())
-  note         String?
-  recordedById String?
-  createdAt    DateTime      @default(now())
+  id                String        @id @default(cuid())
+  bookingId         String?
+  membershipId      String?
+  enrollmentId      String?
+  tournamentEntryId String?
+  venueId           String
+  kind              PaymentKind   @default(PAYMENT)
+  method            PaymentMethod
+  amount            Decimal       @db.Decimal(10, 2)
+  receivedAt        DateTime      @default(now())
+  note              String?
+  recordedById      String?
+  createdAt         DateTime      @default(now())
 
-  booking    Booking?    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  membership Membership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  enrollment Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  recordedBy User?       @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  booking         Booking?           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  membership      Membership?        @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  enrollment      Enrollment?        @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  tournamentEntry TournamentEntrant? @relation(fields: [tournamentEntryId], references: [id], onDelete: Cascade)
+  recordedBy      User?              @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
 
   @@index([venueId, receivedAt])
   @@index([bookingId])
   @@index([membershipId])
   @@index([enrollmentId])
+  @@index([tournamentEntryId])
 }
 
 // Maintenance / unavailable periods for a court. Non-overlapping per court
 // ("CourtBlock_no_overlap" exclusion constraint).
 model CourtBlock {
-  id          String   @id @default(cuid())
-  venueId     String
-  courtId     String
-  startTime   DateTime
-  endTime     DateTime
-  reason      String?
-  classId     String? // set when this block is a session of a coaching class
-  createdById String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  venueId      String
+  courtId      String
+  startTime    DateTime
+  endTime      DateTime
+  reason       String?
+  classId      String? // set when this block is a session of a coaching class
+  tournamentId String? // set when this block reserves a court for a tournament
+  createdById  String?
+  createdAt    DateTime @default(now())
 
-  venue     Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  court     Court  @relation(fields: [courtId], references: [id], onDelete: Cascade)
-  class     Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
-  createdBy User?  @relation("CourtBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  venue      Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  court      Court       @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  class      Class?      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  tournament Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  createdBy  User?       @relation("CourtBlockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([courtId, startTime])
   @@index([classId, startTime])
+  @@index([tournamentId, startTime])
 }
 
 // ─── Players, memberships, classes ────────────────────────────────────────────
@@ -472,6 +481,8 @@ model Player {
   memberships Membership[]
   enrollments Enrollment[]
   bookings    Booking[]
+
+  tournamentEntries TournamentEntrant[]
 
   @@index([venueId, name])
 }
@@ -614,4 +625,104 @@ model WalkInBooking {
   createdAt    DateTime @default(now())
 
   venue Venue @relation(fields: [venueId], references: [id])
+}
+
+// ─── Tournaments ──────────────────────────────────────────────────────────────
+
+enum TournamentStatus {
+  REGISTRATION // taking entries
+  IN_PROGRESS // bracket drawn, matches being played
+  COMPLETED
+  CANCELLED
+}
+
+enum TournamentEntryType {
+  SINGLES
+  DOUBLES
+  TEAM
+}
+
+enum MatchStatus {
+  PENDING
+  COMPLETED
+}
+
+// A knockout tournament. Its courts are reserved every day from startDate to
+// endDate between startMin and endMin (CourtBlock rows with tournamentId).
+model Tournament {
+  id              String              @id @default(cuid())
+  venueId         String
+  name            String
+  description     String?
+  sportId         String?
+  courtIds        String[]
+  startDate       String // venue-local 'YYYY-MM-DD', inclusive
+  endDate         String
+  startMin        Int
+  endMin          Int
+  entryType       TournamentEntryType @default(SINGLES)
+  maxEntrants     Int?
+  entryFee        Decimal             @db.Decimal(10, 2)
+  // [{ label: "Winner", amount: 500, paid: false }, …] in finishing order
+  prizes          Json                @default("[]")
+  status          TournamentStatus    @default(REGISTRATION)
+  winnerEntrantId String?
+  createdById     String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  venue    Venue               @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sport    Sport?              @relation(fields: [sportId], references: [id], onDelete: SetNull)
+  sessions CourtBlock[]
+  entrants TournamentEntrant[]
+  matches  TournamentMatch[]
+
+  @@index([venueId, status])
+}
+
+// One entry: a player, a pair or a team.
+model TournamentEntrant {
+  id           String   @id @default(cuid())
+  tournamentId String
+  venueId      String
+  name         String // display name, e.g. "Asha Rao" or "Asha / Ravi"
+  playerId     String? // linked player record (main contact)
+  phone        String?
+  seed         Int?
+  withdrawn    Boolean  @default(false)
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  tournament Tournament        @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  player     Player?           @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  payments   Payment[]
+  matchesA   TournamentMatch[] @relation("MatchEntrantA")
+  matchesB   TournamentMatch[] @relation("MatchEntrantB")
+  matchesWon TournamentMatch[] @relation("MatchWinner")
+
+  @@index([tournamentId])
+}
+
+// A knockout match. Round 1 is the first round; the winner of (round r, position p)
+// moves to (round r+1, position floor(p/2)), slot A if p is even, B if odd.
+model TournamentMatch {
+  id           String      @id @default(cuid())
+  tournamentId String
+  round        Int
+  position     Int
+  entrantAId   String?
+  entrantBId   String?
+  winnerId     String?
+  score        String?
+  courtId      String?
+  scheduledAt  DateTime?
+  status       MatchStatus @default(PENDING)
+  updatedAt    DateTime    @updatedAt
+
+  tournament Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  entrantA   TournamentEntrant? @relation("MatchEntrantA", fields: [entrantAId], references: [id], onDelete: SetNull)
+  entrantB   TournamentEntrant? @relation("MatchEntrantB", fields: [entrantBId], references: [id], onDelete: SetNull)
+  winner     TournamentEntrant? @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+
+  @@unique([tournamentId, round, position])
 }

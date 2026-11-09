@@ -68,6 +68,7 @@ export async function GET(req: Request) {
         ...(bookingOnly && { booking: bookingFilter }),
         ...(category === 'MEMBERSHIP' && { membershipId: { not: null } }),
         ...(category === 'CLASS' && { enrollmentId: { not: null } }),
+        ...(category === 'TOURNAMENT' && { tournamentEntryId: { not: null } }),
       }
       const rows = await prisma.payment.findMany({
         where,
@@ -76,6 +77,7 @@ export async function GET(req: Request) {
           booking: { select: { customer: true, startTime: true, court: { select: { name: true } } } },
           membership: { select: { player: { select: { name: true } }, plan: { select: { name: true } } } },
           enrollment: { select: { player: { select: { name: true } }, class: { select: { name: true } } } },
+          tournamentEntry: { select: { name: true, tournament: { select: { name: true } } } },
         },
         orderBy: { receivedAt: 'desc' },
         take: LIMIT,
@@ -90,9 +92,12 @@ export async function GET(req: Request) {
           receivedDate: localDateOf(p.receivedAt, tz),
           receivedMin: localMinutesOf(p.receivedAt, tz),
           bookingId: p.bookingId,
-          customer: p.booking?.customer ?? p.membership?.player.name ?? p.enrollment?.player.name ?? '—',
+          customer: p.booking?.customer ?? p.membership?.player.name ?? p.enrollment?.player.name ?? p.tournamentEntry?.name ?? '—',
           // For membership/class payments this column describes what was paid for.
-          courtName: p.booking?.court.name ?? (p.membership ? `Membership · ${p.membership.plan.name}` : `Class · ${p.enrollment?.class.name ?? ''}`),
+          courtName: p.booking?.court.name
+            ?? (p.membership ? `Membership · ${p.membership.plan.name}`
+              : p.enrollment ? `Class · ${p.enrollment.class.name}`
+              : `Tournament · ${p.tournamentEntry?.tournament.name ?? ''}`),
           bookingDate: p.booking ? localDateOf(p.booking.startTime, tz) : null,
         })),
       })

@@ -84,7 +84,7 @@ describe('computeMetrics', () => {
       ],
     })
     expect(r.collected).toBe(159)
-    expect(r.byType.map((t) => [t.key, t.collected])).toEqual([['BOOKING', 20], ['MEMBERSHIP', 99], ['CLASS', 40]])
+    expect(r.byType.map((t) => [t.key, t.collected])).toEqual([['BOOKING', 20], ['MEMBERSHIP', 99], ['CLASS', 40], ['TOURNAMENT', 0]])
     expect(r.byCourt.find((c) => c.key === 'c1')?.collected).toBe(20)
     expect(r.bySport.reduce((s, x) => s + (x.collected ?? 0), 0)).toBe(20)
   })

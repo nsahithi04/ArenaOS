@@ -20,7 +20,7 @@ export async function GET(req: Request) {
       where: { venueId: ctx.access.venueId, startTime: { lt: end }, endTime: { gt: start } },
       orderBy: { startTime: 'asc' },
       take: 5000,
-      include: { class: { select: { name: true, coachName: true } } },
+      include: { class: { select: { name: true, coachName: true } }, tournament: { select: { name: true } } },
     })
     return NextResponse.json(
       blocks.map((b) => ({
@@ -30,6 +30,8 @@ export async function GET(req: Request) {
         classId: b.classId,
         className: b.class?.name ?? null,
         coachName: b.class?.coachName ?? null,
+        tournamentId: b.tournamentId,
+        tournamentName: b.tournament?.name ?? null,
         start: b.startTime.toISOString(),
         end: b.endTime.toISOString(),
         date: localDateOf(b.startTime, venue.timezone),
