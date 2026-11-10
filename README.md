@@ -23,6 +23,7 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
 - **Memberships:** monthly or yearly plans (optionally for one sport) sold at the front desk, with full or partial payment. Members play free: staff pick "Member" when booking a walk-in or phone call, and the court time is covered as long as the membership is valid on that date.
 - **Classes:** coaching or group classes with a coach, courts, days, times and a term. Every session reserves its courts automatically, using the same no-overlap protection as bookings. Clashes with existing bookings are listed before anything is saved. Includes enrolment with capacity limits and per-month or per-term fees.
 - **Tournaments:** knockout events (singles, doubles or teams) that reserve chosen courts every day of the event. They include entries with fees and seeds, a seeded draw with automatic byes, a visual bracket where results move winners into the next round, walkovers, corrections, champion and placings, and prize tracking.
+- **Payments** (owners and managers): a ledger of every payment and refund across bookings, memberships, classes and tournaments, each as its own row, with search, filters, sorting, totals and CSV export. A **Pending** tab lists everything still owed (part payments included). A **Renewals** tab lists memberships ending soon or recently ended, with renewal reminder emails and one-click renew.
 - **Team and permissions:** three levels, enforced on the server:
   | | Owner | Manager | Employee |
   |---|---|---|---|
@@ -73,6 +74,7 @@ lib/
   team/              built-in roles (Manager, Employee) and team rules
   club/              memberships, classes, enrolments, schedules
   tournaments/       knockout bracket logic, tournament service
+  payments/          payments ledger, outstanding balances, renewals
   booking/           booking engine: time zones, pricing, availability, validation,
                      access control, service (transactions), queries, dashboard metrics
   db.ts, mail.ts, cloudinary.ts, permissions.ts, slug.ts

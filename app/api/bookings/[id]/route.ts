@@ -18,7 +18,7 @@ async function detail(id: string, includeContact: boolean) {
       createdBy: { select: { name: true } },
       payments: {
         select: { id: true, kind: true, method: true, amount: true, receivedAt: true, note: true, recordedBy: { select: { name: true } } },
-        orderBy: { receivedAt: 'asc' },
+        orderBy: { receivedAt: 'desc' },
       },
     },
   })

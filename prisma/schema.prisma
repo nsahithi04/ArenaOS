@@ -510,17 +510,18 @@ enum MembershipStatus {
 
 // startDate/endDate are venue-local dates ('YYYY-MM-DD', inclusive). Expiry is derived from endDate.
 model Membership {
-  id          String           @id @default(cuid())
-  venueId     String
-  playerId    String
-  planId      String
-  startDate   String
-  endDate     String
-  price       Decimal          @db.Decimal(10, 2)
-  status      MembershipStatus @default(ACTIVE)
-  cancelledAt DateTime?
-  createdById String?
-  createdAt   DateTime         @default(now())
+  id                    String           @id @default(cuid())
+  venueId               String
+  playerId              String
+  planId                String
+  startDate             String
+  endDate               String
+  price                 Decimal          @db.Decimal(10, 2)
+  status                MembershipStatus @default(ACTIVE)
+  cancelledAt           DateTime?
+  renewalReminderSentAt DateTime? // last renewal reminder email
+  createdById           String?
+  createdAt             DateTime         @default(now())
 
   venue    Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   player   Player         @relation(fields: [playerId], references: [id], onDelete: Cascade)

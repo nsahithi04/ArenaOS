@@ -132,7 +132,9 @@ async function main() {
   const members = [
     ['Priya Nair', '+1 480 555 0201', monthly, localDate(-10), 99],
     ['Marcus Bell', '+1 480 555 0202', annual, localDate(-40), 999],
-    ['Hana Sato', '+1 480 555 0203', monthly, localDate(-2), 50], // still owes 49
+    ['Hana Sato', '+1 480 555 0203', monthly, localDate(-2), [25, 25]], // two instalments, still owes 49
+    ['Kai Rivers', '+1 480 555 0204', monthly, localDate(-26), 99], // ends in a few days → Renewals
+    ['Zoe Grant', '+1 480 555 0205', monthly, localDate(-38), 99], // ended last week, not renewed
   ]
   const memberships = []
   for (const [name, phone, plan, start, paid] of members) {
@@ -140,7 +142,9 @@ async function main() {
     const ms = await prisma.membership.create({
       data: { venueId: venue.id, playerId: player.id, planId: plan.id, startDate: start, endDate: endOf(start, plan.durationMonths), price: plan.price, createdById: owner.id },
     })
-    await prisma.payment.create({ data: { venueId: venue.id, membershipId: ms.id, method: 'UPI', amount: paid, receivedAt: at(start, 10 * 60), recordedById: owner.id } })
+    for (const [i, amt] of [paid].flat().entries()) {
+      await prisma.payment.create({ data: { venueId: venue.id, membershipId: ms.id, method: i ? 'CASH' : 'UPI', amount: amt, receivedAt: at(start, 10 * 60 + i * 60 * 24), recordedById: owner.id } })
+    }
     memberships.push({ ms, player })
   }
   // A member booking tomorrow morning, covered by Priya's membership
@@ -178,8 +182,11 @@ async function main() {
     if (paid) await prisma.payment.create({ data: { venueId: venue.id, enrollmentId: e.id, method: 'CASH', amount: paid, recordedById: owner.id } })
   }
 
-  // ── A tournament two weekends out, registration open (make the draw in the app) ──
-  const tStart = localDate(14), tEnd = localDate(15)
+  // ── A weekend tournament, registration open (make the draw in the app) ──
+  // First Saturday at least 12 days out, so it never overlaps the Mon/Wed class
+  let tOffset = 12
+  while (new Date(`${localDate(tOffset)}T00:00:00Z`).getUTCDay() !== 6) tOffset++
+  const tStart = localDate(tOffset), tEnd = localDate(tOffset + 1)
   const tour = await prisma.tournament.create({
     data: {
       venueId: venue.id, name: 'Fall Classic', description: 'Singles knockout, best of 3 games to 11.', sportId: pickle.id,

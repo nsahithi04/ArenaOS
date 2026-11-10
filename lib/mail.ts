@@ -103,3 +103,30 @@ export async function sendOtpEmail(to: string, otp: string) {
     `,
   })
 }
+
+export async function sendRenewalReminderEmail(to: string, opts: { playerName: string; venueName: string; planName: string; endDate: string; price: string; expired: boolean }) {
+  const name = esc(opts.playerName)
+  const venue = esc(opts.venueName)
+  const plan = esc(opts.planName)
+  const end = esc(opts.endDate)
+  const price = esc(opts.price)
+  const headline = opts.expired ? 'Your membership has ended' : 'Your membership is ending soon'
+  const line = opts.expired
+    ? `Your <strong style="color:#0f172a;">${plan}</strong> membership at <strong style="color:#0f172a;">${venue}</strong> ended on <strong>${end}</strong>.`
+    : `Your <strong style="color:#0f172a;">${plan}</strong> membership at <strong style="color:#0f172a;">${venue}</strong> ends on <strong>${end}</strong>.`
+  return send({
+    from: `"${opts.venueName.replace(/"/g, '')} via GameOn" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: opts.expired ? `Renew your ${opts.planName} at ${opts.venueName}` : `Your ${opts.planName} at ${opts.venueName} ends ${opts.endDate}`,
+    html: `
+      <div style="font-family:Inter,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;">
+        <div style="margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#16a34a;">${venue}</span></div>
+        <h2 style="font-size:20px;font-weight:600;color:#0f172a;margin:0 0 8px;">${headline}</h2>
+        <p style="color:#64748b;font-size:14px;margin:0 0 16px;">Hi ${name},</p>
+        <p style="color:#64748b;font-size:14px;margin:0 0 16px;">${line}</p>
+        <p style="color:#64748b;font-size:14px;margin:0 0 28px;">Renew for <strong style="color:#16a34a;">${price}</strong> at the front desk or reply to this email, and keep playing without interruption.</p>
+        <p style="color:#94a3b8;font-size:12px;margin:0;">You're receiving this because you're a member at ${venue}.</p>
+      </div>
+    `,
+  })
+}

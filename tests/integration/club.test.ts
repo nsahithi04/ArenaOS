@@ -123,7 +123,8 @@ describe.skipIf(!enabled)('memberships and classes', () => {
 
   let classId: string
   const mon = () => nextWeekday(today, 1)
-  const wed = () => nextWeekday(today, 3)
+  // Wednesday/Friday of the class's first week (always after its Monday start, whatever today is)
+  const wed = () => addDays(mon(), 2)
 
   it('a class reserves its courts on every class day; clashes are reported first', async () => {
     as(V.owner.id)
@@ -178,7 +179,7 @@ describe.skipIf(!enabled)('memberships and classes', () => {
     const r = await classById.PATCH(req('PATCH', '/x', { days: ['FRIDAY'], courtIds: [V.court2.id] }), p1(classId))
     expect(r.status).toBe(200)
     expect((await bookings.POST(req('POST', '/api/bookings', { courtId: V.court1.id, customer: 'Free now', source: 'PHONE', date: wed(), start: '17:00', end: '18:00' }))).status).toBe(201)
-    const friday = nextWeekday(today, 5)
+    const friday = addDays(mon(), 4)
     expect((await bookings.POST(req('POST', '/api/bookings', { courtId: V.court2.id, customer: 'Z', source: 'PHONE', date: friday, start: '17:00', end: '18:00' }))).status).toBe(409)
 
     // Cancel: future sessions freed

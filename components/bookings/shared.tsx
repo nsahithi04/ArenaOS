@@ -69,7 +69,7 @@ export type BookingContext = {
   courts: { id: string; name: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
   sports: { id: string; name: string; emoji: string | null }[]
   hours: HoursRow[]
-  permissions: { isOwner: boolean; canEditBookings: boolean; canRefund: boolean; canViewReports: boolean; canManageVenue: boolean }
+  permissions: { isOwner: boolean; canEditBookings: boolean; canRefund: boolean; canViewReports: boolean; canManageVenue: boolean; canViewBilling: boolean }
 }
 
 // ─── Labels & colours (match the existing GameOn screens) ───────────────────
