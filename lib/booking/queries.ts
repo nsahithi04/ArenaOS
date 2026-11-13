@@ -2,13 +2,14 @@
 
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { addDays, isLocalDate, localDateOf, localMinutesOf, localRangeToUtc } from './time'
+import { courtLabelSelect, labelOf } from './courts'
 import { BOOKING_SOURCES, BOOKING_STATUSES, PAYMENT_STATUSES } from './validation'
 
 export const bookingSelect = {
   id: true, venueId: true, courtId: true, sportId: true, customer: true, phone: true, email: true, sport: true,
   source: true, startTime: true, endTime: true, amountUsd: true, priceOverridden: true, payment: true, status: true,
   notes: true, cancelledAt: true, cancelReason: true, createdAt: true, updatedAt: true,
-  court: { select: { name: true } },
+  court: { select: courtLabelSelect },
   sportRef: { select: { name: true, emoji: true } },
   payments: { select: { kind: true, amount: true } },
   playerId: true,
@@ -38,7 +39,8 @@ export function toBookingDTO(b: BookingRow, tz: string, opts: { includeContact: 
     phone: opts.includeContact ? b.phone : null,
     email: opts.includeContact ? b.email : null,
     courtId: b.courtId,
-    courtName: b.court.name,
+    courtName: labelOf(b.court),
+    courtShortName: b.court.name,
     sportId: b.sportId,
     sportName: b.sportRef?.name ?? b.sport ?? null,
     sportEmoji: b.sportRef?.emoji ?? null,

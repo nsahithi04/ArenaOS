@@ -130,3 +130,26 @@ export async function sendRenewalReminderEmail(to: string, opts: { playerName: s
     `,
   })
 }
+
+export async function sendShiftScheduleEmail(to: string, opts: { name: string; venueName: string; heading: string; intro: string; shifts: { day: string; time: string; position: string | null }[]; link: string }) {
+  const rows = opts.shifts.map((s) => `
+    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#0f172a;font-size:14px;font-weight:600;">${esc(s.day)}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#334155;font-size:14px;">${esc(s.time)}</td>
+      <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;color:#64748b;font-size:13px;">${esc(s.position ?? '')}</td>
+    </tr>`).join('')
+  return send({
+    from: `"${opts.venueName.replace(/"/g, '')} via GameOn" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: `${opts.heading} · ${opts.venueName}`,
+    html: `
+      <div style="font-family:Inter,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;">
+        <div style="margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#16a34a;">${esc(opts.venueName)}</span></div>
+        <h2 style="font-size:20px;font-weight:600;color:#0f172a;margin:0 0 8px;">${esc(opts.heading)}</h2>
+        <p style="color:#64748b;font-size:14px;margin:0 0 16px;">Hi ${esc(opts.name)}, ${esc(opts.intro)}</p>
+        ${rows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:24px;">${rows}</table>` : ''}
+        <a href="${opts.link}" style="display:inline-block;background:linear-gradient(135deg,#16a34a,#15803d);color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;">View my shifts</a>
+      </div>
+    `,
+  })
+}

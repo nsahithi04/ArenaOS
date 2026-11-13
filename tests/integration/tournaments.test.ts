@@ -66,18 +66,37 @@ describe.skipIf(!enabled)('tournaments', () => {
     as(V.owner.id)
     const refused = await tournaments.POST(req('POST', '/x', body()))
     expect(refused.status).toBe(409)
-    expect((await refused.json()).details.conflicts).toEqual([expect.objectContaining({ what: 'Booking: In the way' })])
+    const refusedBody = await refused.json()
+    expect(refusedBody.details.conflicts).toEqual([expect.objectContaining({ what: 'Booking: In the way', courtName: 'Court 2 · Pickleball', time: '10:00 AM – 11:00 AM' })])
+    // The message itself names the court, day, time and what is in the way.
+    expect(refusedBody.error).toMatch(/^1 clash with existing bookings or blocks: Court 2 · Pickleball on \w{3}, \w{3} \d+, 10:00 AM – 11:00 AM \(Booking: In the way\)\.$/)
     const ok = await tournaments.POST(req('POST', '/x', { ...body(), skipConflicts: true }))
     expect(ok.status).toBe(201)
     const r = await ok.json()
     tid = r.id
-    expect(r).toMatchObject({ sessions: 3, skipped: 1 }) // 2 courts × 2 days − 1 clash
+    // 3 clean court-days + the clashing court-day reserved around the booking (9–10 and 11–6).
+    expect(r).toMatchObject({ sessions: 5, skipped: 0, trimmed: 1 })
+    const around = await prisma.courtBlock.findMany({ where: { tournamentId: tid, courtId: V.court2.id }, orderBy: { startTime: 'asc' } })
+    const hrs = (d: Date) => new Intl.DateTimeFormat('en-US', { timeZone: V.venue.timezone, hour: 'numeric', hour12: false }).format(d)
+    expect(around.map((b) => `${hrs(b.startTime)}-${hrs(b.endTime)}`)).toEqual(['09-18', '09-10', '11-18'])
 
     const blocked = await bookings.POST(req('POST', '/api/bookings', { courtId: V.court1.id, customer: 'X', source: 'PHONE', date: addDays(today, 3), start: '12:00', end: '13:00' }))
     expect(blocked.status).toBe(409)
     expect((await blocked.json()).error).toContain('Winter Open')
     const block = await prisma.courtBlock.findFirstOrThrow({ where: { tournamentId: tid } })
     expect((await blockById.DELETE(req('DELETE', '/x'), p1(block.id))).status).toBe(409)
+  })
+
+  it('sees class and maintenance blocks as clashes, naming them', async () => {
+    as(V.owner.id)
+    const d = addDays(today, 20)
+    const at = (h: number) => new Date(`${d}T${String(h).padStart(2, '0')}:00:00Z`)
+    await prisma.courtBlock.create({ data: { venueId: V.venue.id, courtId: V.court1.id, startTime: at(17), endTime: at(18), reason: 'Maintenance', createdById: V.owner.id } })
+    const res = await tournaments.POST(req('POST', '/x', { ...body(), name: 'Clashy', courtIds: [V.court1.id], startDate: d, endDate: d, start: '00:00', end: '23:00' }))
+    expect(res.status).toBe(409)
+    const j = await res.json()
+    expect(j.details.conflicts).toEqual([expect.objectContaining({ what: 'Maintenance', courtName: 'Court 1 · Pickleball' })])
+    expect(j.error).toContain('(Maintenance)')
   })
 
   it('registers entries with fees, seeds and a capacity limit', async () => {
@@ -90,6 +109,18 @@ describe.skipIf(!enabled)('tournaments', () => {
     // Seed clash and overpayment are refused
     expect((await entrants.POST(req('POST', '/x', { name: 'Fay', seed: 1 }), p1(tid))).status).toBe(409)
     expect((await entrants.POST(req('POST', '/x', { name: 'Fay', payment: { amount: 30, method: 'CASH' } }), p1(tid))).status).toBe(422)
+    // The same person can't be entered twice: by name (any case/spacing), linked player or phone.
+    const dupName = await entrants.POST(req('POST', '/x', { newPlayer: { name: '  ' + names[0].toUpperCase() } }), p1(tid))
+    expect(dupName.status).toBe(409)
+    expect((await dupName.json()).error).toContain('is already entered in this tournament')
+    const first = await prisma.tournamentEntrant.findFirstOrThrow({ where: { tournamentId: tid, playerId: { not: null } }, orderBy: { createdAt: 'asc' } })
+    expect((await entrants.POST(req('POST', '/x', { playerId: first.playerId }), p1(tid))).status).toBe(409)
+    const playersBefore = await prisma.player.count({ where: { venueId: V.venue.id } })
+    await prisma.tournamentEntrant.update({ where: { id: first.id }, data: { phone: '+1 480 555 0199' } })
+    const dupPhone = await entrants.POST(req('POST', '/x', { newPlayer: { name: 'Someone Else', phone: '480-555-0199' } }), p1(tid))
+    expect(dupPhone.status).toBe(409)
+    expect((await dupPhone.json()).error).toContain(`(as ${first.name})`)
+    expect(await prisma.player.count({ where: { venueId: V.venue.id } })).toBe(playersBefore) // nothing left behind
     expect((await entrants.POST(req('POST', '/x', { name: 'Fay' }), p1(tid))).status).toBe(201)
     expect((await entrants.POST(req('POST', '/x', { name: 'Gus' }), p1(tid))).status).toBe(409) // full at 6
     const d = await detail()
@@ -120,6 +151,21 @@ describe.skipIf(!enabled)('tournaments', () => {
     expect((await entrants.POST(req('POST', '/x', { name: 'Late' }), p1(tid))).status).toBe(422)
   })
 
+  it('reopens registration after the draw, until a result is recorded', async () => {
+    as(employee.id)
+    expect((await draw.DELETE(req('DELETE', '/x'), p1(tid))).status).toBe(403)
+    as(V.owner.id)
+    const res = await draw.DELETE(req('DELETE', '/x'), p1(tid))
+    expect(res.status).toBe(200)
+    let d = await detail()
+    expect(d.status).toBe('REGISTRATION')
+    expect(d.rounds).toHaveLength(0)
+    expect(d.entrants.length).toBeGreaterThan(1) // entries are kept
+    expect((await draw.POST(req('POST', '/x', { random: false }), p1(tid))).status).toBe(200)
+    d = await detail()
+    expect(d.status).toBe('IN_PROGRESS')
+  })
+
   it('records results, advances winners, guards corrections, and crowns a champion', async () => {
     as(employee.id)
     let d = await detail()
@@ -136,6 +182,9 @@ describe.skipIf(!enabled)('tournaments', () => {
     // Redraw no longer allowed
     as(V.owner.id)
     expect((await draw.POST(req('POST', '/x', {}), p1(tid))).status).toBe(422)
+    const reopen = await draw.DELETE(req('DELETE', '/x'), p1(tid))
+    expect(reopen.status).toBe(422)
+    expect((await reopen.json()).error).toContain('1 result has been recorded')
 
     // Play the semi-finals
     as(employee.id)

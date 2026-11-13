@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { prisma } from '@/lib/db'
+import { courtNameProblems } from '@/lib/booking/courts'
 
 type CourtPayload = {
   name: string
@@ -22,6 +23,10 @@ export async function POST(req: Request) {
       where: { ownerId: session.user.id, isSetupDone: false },
     })
     if (!venue) return NextResponse.json({ error: 'No venue in progress' }, { status: 404 })
+    if (!Array.isArray(courts)) return NextResponse.json({ error: 'courts must be an array' }, { status: 400 })
+    const sports = await prisma.sport.findMany({ where: { venueId: venue.id }, select: { id: true, name: true } })
+    const problems = courtNameProblems(courts, (sid) => sports.find((s) => s.id === sid)?.name ?? '')
+    if (problems.length) return NextResponse.json({ error: problems[0].message, code: 'COURT_NAME', problems }, { status: 422 })
 
     await prisma.court.deleteMany({ where: { venueId: venue.id } })
 
@@ -30,7 +35,7 @@ export async function POST(req: Request) {
         data: courts.map((c) => ({
           venueId: venue.id,
           sportId: c.sportId || null,
-          name: c.name,
+          name: c.name.trim().replace(/\s+/g, ' '),
           type: c.type === 'Outdoor' ? 'OUTDOOR' : 'INDOOR',
           capacity: c.capacity,
           description: c.description || null,

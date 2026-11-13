@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { courtLabelSelect, labelOf } from '@/lib/booking/courts'
 import { prisma } from '@/lib/db'
 import { handleError, readJson, requireVenue } from '@/lib/booking/route-helpers'
 import { todayIn, zonedToUtc } from '@/lib/booking/time'
@@ -24,8 +25,8 @@ export async function GET(req: Request) {
       },
       orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
     })
-    const courts = await prisma.court.findMany({ where: { venueId }, select: { id: true, name: true } })
-    const courtName = new Map(courts.map((c) => [c.id, c.name]))
+    const courts = await prisma.court.findMany({ where: { venueId }, select: { id: true, ...courtLabelSelect } })
+    const courtName = new Map(courts.map((c) => [c.id, labelOf(c)]))
     return NextResponse.json({
       today,
       currency: venue.currency,

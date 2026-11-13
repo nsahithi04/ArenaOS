@@ -79,12 +79,14 @@ async function main() {
   // Built-in roles (must match lib/team/presets.ts)
   const managerRole = await prisma.venueRole.create({ data: { venueId: venue.id, preset: 'MANAGER', name: 'Manager', color: '#7c3aed', permissions: { bookings: 'edit', venue: 'edit', reports: 'view', billing: 'edit', team: 'edit' } } })
   const employeeRole = await prisma.venueRole.create({ data: { venueId: venue.id, preset: 'EMPLOYEE', name: 'Employee', color: '#2563eb', permissions: { bookings: 'edit', venue: 'none', reports: 'none', billing: 'none', team: 'none' } } })
-  for (const [email, name, pw, role] of [
-    ['demo-manager@gameon.test', 'Demo Manager', 'DemoManager!2026', managerRole],
-    ['demo-staff@gameon.test', 'Demo Employee', 'DemoStaff!2026', employeeRole],
+  const staffMembers = {}
+  for (const [key, email, name, pw, role, pay] of [
+    ['manager', 'demo-manager@gameon.test', 'Demo Manager', 'DemoManager!2026', managerRole, { payType: 'MONTHLY', payRate: 3200, position: 'Duty manager' }],
+    ['employee', 'demo-staff@gameon.test', 'Demo Employee', 'DemoStaff!2026', employeeRole, { payType: 'HOURLY', payRate: 18, position: 'Front desk' }],
   ]) {
     const user = await prisma.user.create({ data: { email, name, role: 'STAFF', emailVerified: new Date(), password: await bcrypt.hash(pw, 10) } })
-    await prisma.venueMember.create({ data: { venueId: venue.id, userId: user.id, roleId: role.id, email, name, status: 'active' } })
+    const member = await prisma.venueMember.create({ data: { venueId: venue.id, userId: user.id, roleId: role.id, email, name, status: 'active', ...pay } })
+    staffMembers[key] = { user, member }
   }
 
   // A handful of bookings around today, non-overlapping per court.
@@ -208,6 +210,25 @@ async function main() {
     const e = await prisma.tournamentEntrant.create({ data: { tournamentId: tour.id, venueId: venue.id, name, playerId: player.id, phone: player.phone, seed, createdById: owner.id } })
     if (paid) await prisma.payment.create({ data: { venueId: venue.id, tournamentEntryId: e.id, method: 'CASH', amount: paid, recordedById: owner.id } })
   }
+
+  // ── Staff: last week + this week's rota (published), one draft, clock-ins for days already worked ──
+  const todayStr = localDate(0)
+  const dowToday = (new Date(`${todayStr}T00:00:00Z`).getUTCDay() + 6) % 7 // 0 = Monday
+  const dayOf = (i) => localDate(i - dowToday) // i = 0 → this Monday
+  const emp = staffMembers.employee.member
+  const mgr = staffMembers.manager.member
+  for (const i of [-7, -6, -5, -4, -3, 0, 1, 2, 3, 4]) { // last week and this week, Mon–Fri
+    const d = dayOf(i)
+    await prisma.shift.create({ data: { venueId: venue.id, memberId: emp.id, date: d, startTime: at(d, 9 * 60), endTime: at(d, 17 * 60), position: 'Front desk', published: true, notifiedAt: new Date(), createdById: owner.id } })
+    if (d < todayStr) {
+      await prisma.timeEntry.create({ data: { venueId: venue.id, memberId: emp.id, clockIn: at(d, 9 * 60 + 3), clockOut: at(d, 17 * 60 + 6), createdById: emp.userId } })
+    }
+  }
+  for (const i of [1, 3, 5]) {
+    const d = dayOf(i)
+    await prisma.shift.create({ data: { venueId: venue.id, memberId: mgr.id, date: d, startTime: at(d, 12 * 60), endTime: at(d, 20 * 60), position: 'Duty manager', published: i !== 5, createdById: owner.id } })
+  }
+  await prisma.notification.create({ data: { userId: emp.userId, venueId: venue.id, title: 'Your shifts for this week', body: 'Mon–Fri, 9 AM – 5 PM · Front desk', link: '/my-shifts' } })
 
   console.log(`Demo venue ready in local database "${db}" (${plan.length} bookings, ${members.length} members, 1 class with ${sessions} sessions, 1 tournament (${entries.length} entries), today = ${localDate(0)} ${TZ})`)
 }

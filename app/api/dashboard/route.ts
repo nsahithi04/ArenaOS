@@ -48,7 +48,7 @@ async function metricsFor(db: PrismaClient, venueId: string, cfg: Awaited<Return
       sportName: p.booking ? p.booking.sportRef?.name ?? p.booking.sport : null, source: p.booking?.source ?? null,
     })),
     netPaidByBooking: netPaid,
-    courts: cfg.courts,
+    courts: cfg.courts.map((c) => ({ ...c, name: c.label })),
     hours: cfg.hours,
   })
 }
@@ -123,7 +123,7 @@ export async function GET(req: Request) {
         const mins = (d: Date) => localMinutesOf(d, cfg.timezone)
         return {
           courtId: c.id,
-          name: c.name,
+          name: c.label,
           current: cur ? { customer: cur.customer, endMin: mins(cur.endTime) || 1440 } : null,
           next: next ? { customer: next.customer, startMin: mins(next.startTime) } : null,
         }

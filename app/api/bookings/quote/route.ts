@@ -44,7 +44,7 @@ export async function POST(req: Request) {
           endTime: { gt: startAt },
           ...(typeof excludeBookingId === 'string' && { id: { not: excludeBookingId } }),
         },
-        select: { startTime: true, endTime: true },
+        select: { startTime: true, endTime: true, customer: true },
       }),
       prisma.courtBlock.findFirst({
         where: { courtId: court.id, startTime: { lt: endAt }, endTime: { gt: startAt } },
@@ -53,9 +53,9 @@ export async function POST(req: Request) {
     ])
     const fmt = (d: Date) => formatMinutes(localMinutesOf(d, cfg.timezone))
     const conflict = clash
-      ? `Already booked ${fmt(clash.startTime)} – ${fmt(clash.endTime)}`
+      ? `${court.label} is already booked by ${clash.customer}, ${fmt(clash.startTime)} – ${fmt(clash.endTime)}`
       : block
-        ? `Blocked${block.reason ? ` (${block.reason})` : ''} ${fmt(block.startTime)} – ${fmt(block.endTime)}`
+        ? `${court.label} is blocked${block.reason ? ` for ${block.reason}` : ''}, ${fmt(block.startTime)} – ${fmt(block.endTime)}`
         : null
 
     return NextResponse.json({
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       segments: quote.segments,
       uncoveredMinutes: quote.uncoveredMinutes,
       available: !conflict && court.isActive && court.isAvailable,
-      conflict: conflict ?? (!court.isActive || !court.isAvailable ? `${court.name} is not available` : null),
+      conflict: conflict ?? (!court.isActive || !court.isAvailable ? `${court.label} is not available` : null),
       hours: hours.ok
         ? { ok: true }
         : { ok: false, message: hours.reason === 'closed' ? 'Closed on this day' : `Outside operating hours (${formatMinutes(hours.open ?? 0)} – ${formatMinutes(hours.close ?? 0)})` },

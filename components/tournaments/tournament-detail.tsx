@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowLeft, CalendarDays, Check, Clock, Medal, Pencil, Plus, Shuffle, Trophy, UserMinus, Users, Wallet } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, Clock, Medal, Pencil, Plus, Shuffle, Trophy, UserMinus, UserPlus, Users, Wallet } from 'lucide-react'
 import {
-  api, ApiError, Badge, BRAND_GRADIENT, ConfirmDialog, ErrorState, fmtDate, fmtTime, hhmm, inputCls, METHODS, Modal, money, Spinner, useBookingContext,
+  api, ApiError, Badge, BRAND_GRADIENT, ConfirmDialog, ErrorState, FieldError, fieldCls, fmtDate, FormProblems, fmtTime, hhmm, inputCls, METHODS, Modal, money, Spinner, useBookingContext,
   type BookingContext, type PaymentMethod,
 } from '@/components/bookings/shared'
 import { PlayerPicker, playerPayload, type PlayerChoice } from '@/components/club/player-picker'
@@ -42,6 +42,7 @@ export function TournamentDetail({ id }: { id: string }) {
   const [paying, setPaying] = useState<Entrant | null>(null)
   const [withdrawing, setWithdrawing] = useState<Entrant | null>(null)
   const [confirmDraw, setConfirmDraw] = useState(false)
+  const [confirmReopen, setConfirmReopen] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -63,7 +64,7 @@ export function TournamentDetail({ id }: { id: string }) {
   const active = t.entrants.filter((e) => !e.withdrawn)
   const resultsIn = t.rounds.some((r) => r.matches.some((m) => m.status === 'COMPLETED' && m.score !== 'Bye'))
   const canDraw = canManage && (t.status === 'REGISTRATION' || (t.status === 'IN_PROGRESS' && !resultsIn)) && active.length >= 2
-  const courtName = (cid: string | null) => (cid ? ctx.courts.find((c) => c.id === cid)?.name ?? 'Court' : null)
+  const courtName = (cid: string | null) => (cid ? ctx.courts.find((c) => c.id === cid)?.label ?? 'Court' : null)
   const collected = t.entrants.reduce((s, e) => s + e.paid, 0)
 
   async function doDraw() {
@@ -74,6 +75,16 @@ export function TournamentDetail({ id }: { id: string }) {
       setTab('bracket')
       load()
     } catch (e) { toast.error((e as ApiError).message) } finally { setBusy(false); setConfirmDraw(false) }
+  }
+
+  async function doReopen() {
+    setBusy(true)
+    try {
+      await api(`/api/tournaments/${id}/draw`, { method: 'DELETE' })
+      toast.success('Registration reopened: add entries, then make the draw again')
+      setTab('entries')
+      load()
+    } catch (e) { toast.error((e as ApiError).message) } finally { setBusy(false); setConfirmReopen(false) }
   }
 
   async function togglePrizePaid(i: number) {
@@ -123,6 +134,11 @@ export function TournamentDetail({ id }: { id: string }) {
               <Shuffle size={13} /> {t.status === 'REGISTRATION' ? 'Make the draw' : 'Redraw'}
             </button>
           )}
+          {canManage && t.status === 'IN_PROGRESS' && !resultsIn && (
+            <button onClick={() => setConfirmReopen(true)} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border hover:bg-muted disabled:opacity-60">
+              <UserPlus size={13} /> Reopen registration
+            </button>
+          )}
           {canManage && t.status !== 'CANCELLED' && t.status !== 'COMPLETED' && (
             <>
               <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border hover:bg-muted"><Pencil size={13} /> Edit</button>
@@ -154,7 +170,7 @@ export function TournamentDetail({ id }: { id: string }) {
       {tab === 'entries' && (
         <div className="bg-white rounded-xl border border-border overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-            <p className="text-sm text-muted-foreground">{t.status === 'REGISTRATION' ? 'Seeds 1, 2, 3… are kept apart in the draw. Unseeded entries are drawn at random.' : 'Entries are locked: the draw has been made.'}</p>
+            <p className="text-sm text-muted-foreground">{t.status === 'REGISTRATION' ? 'Seeds 1, 2, 3… are kept apart in the draw. Unseeded entries are drawn at random.' : resultsIn ? 'Entries are locked: results have been recorded.' : 'Entries are locked because the draw has been made. Use Reopen registration to change them.'}</p>
             {canEdit && t.status === 'REGISTRATION' && (
               <button onClick={() => setAdding(true)} disabled={t.maxEntrants != null && active.length >= t.maxEntrants}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50" style={{ background: BRAND_GRADIENT }}>
@@ -255,6 +271,12 @@ export function TournamentDetail({ id }: { id: string }) {
           message={<>{active.length} entries go into a knockout bracket. Seeded entries are placed first; the rest are drawn at random.{t.status === 'REGISTRATION' && ' Registration closes.'}</>}
           confirmLabel={t.status === 'REGISTRATION' ? 'Make the draw' : 'Redraw'} busy={busy}
           onCancel={() => setConfirmDraw(false)} onConfirm={doDraw} />
+      )}
+      {confirmReopen && (
+        <ConfirmDialog title="Reopen registration?"
+          message="The current bracket is cleared so you can add, edit or withdraw entries. Entries and fees are kept. Make the draw again when you're ready."
+          confirmLabel="Reopen registration" busy={busy}
+          onCancel={() => setConfirmReopen(false)} onConfirm={doReopen} />
       )}
       {cancelling && (
         <ConfirmDialog title={`Cancel ${t.name}?`} message={`The courts are released for booking. Entries, fees and results stay on record.`} confirmLabel="Cancel tournament" danger
@@ -397,7 +419,7 @@ function MatchDialog({ ctx, t, match, onClose, onDone }: { ctx: BookingContext; 
           <div className="grid grid-cols-3 gap-2">
             <select value={courtId} onChange={(e) => setCourtId(e.target.value)} className={inputCls}>
               <option value="">Court…</option>
-              {t.courtIds.map((cid) => <option key={cid} value={cid}>{ctx.courts.find((c) => c.id === cid)?.name ?? 'Court'}</option>)}
+              {t.courtIds.map((cid) => <option key={cid} value={cid}>{ctx.courts.find((c) => c.id === cid)?.label ?? 'Court'}</option>)}
             </select>
             <input type="date" value={date} min={t.startDate} max={t.endDate} onChange={(e) => setDate(e.target.value)} className={inputCls} />
             <input type="time" step={300} value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
@@ -419,11 +441,34 @@ function AddEntry({ ctx, t, onClose, onDone }: { ctx: BookingContext; t: Detail;
   const [amount, setAmount] = useState(String(t.entryFee))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tried, setTried] = useState(false)
+
+  // Same person already in (not withdrawn): same player, name or phone. Checked live.
+  const key = (x: string) => x.trim().replace(/\s+/g, ' ').toLowerCase()
+  const digits = (x: string | null | undefined) => (x ?? '').replace(/\D/g, '').slice(-10)
+  const active = t.entrants.filter((e) => !e.withdrawn)
+  const pName = player?.kind === 'existing' ? player.player.name : player?.kind === 'new' ? player.name : ''
+  const pPhone = player?.kind === 'existing' ? player.player.phone : player?.kind === 'new' ? player.phone : ''
+  const playerDup = player && active.find((e) =>
+    (player.kind === 'existing' && e.playerId === player.player.id)
+    || (!team && pName.trim() && key(e.name) === key(pName))
+    || (digits(pPhone).length >= 7 && digits(e.phone) === digits(pPhone)))
+  const teamDup = team && name.trim() ? active.find((e) => key(e.name) === key(name)) : undefined
+
+  function validate() {
+    const e: Record<string, string> = {}
+    if (team && !name.trim()) e.name = t.entryType === 'DOUBLES' ? 'Enter the pair name, e.g. "Asha / Ravi"' : 'Enter the team name'
+    if (!team && !player) e.player = 'Choose or add the player'
+    if (player?.kind === 'new' && !player.name.trim()) e.player = 'Enter the player name'
+    return e
+  }
+  const errs: Record<string, string> = { ...(tried ? validate() : {}) }
+  if (teamDup) errs.name = `"${teamDup.name}" is already entered in this tournament.`
+  if (playerDup) errs.player = `${pName.trim() || 'This player'} is already entered${key(playerDup.name) !== key(pName) ? ` (as ${playerDup.name})` : ''}.`
 
   async function save() {
-    if (!team && !player) return setError('Choose or add the player')
-    if (team && !name.trim()) return setError(t.entryType === 'DOUBLES' ? 'Enter the pair name, e.g. "Asha / Ravi"' : 'Enter the team name')
-    if (player?.kind === 'new' && !player.name.trim()) return setError('Enter the player name')
+    setTried(true)
+    if (Object.keys(validate()).length || teamDup || playerDup) { setError(null); return }
     setBusy(true); setError(null)
     try {
       await api(`/api/tournaments/${t.id}/entrants`, {
@@ -442,13 +487,18 @@ function AddEntry({ ctx, t, onClose, onDone }: { ctx: BookingContext; t: Detail;
         <button onClick={save} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-60 flex items-center gap-2" style={{ background: BRAND_GRADIENT }}>{busy && <Spinner />} Add entry</button>
       </div>}>
       <div className="space-y-4">
+        <FormProblems errors={errs} message={error} />
         {team && (
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">{t.entryType === 'DOUBLES' ? 'Pair name *' : 'Team name *'}</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder={t.entryType === 'DOUBLES' ? 'Asha / Ravi' : 'Desert Smashers'} className={inputCls} autoFocus />
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder={t.entryType === 'DOUBLES' ? 'Asha / Ravi' : 'Desert Smashers'} className={fieldCls(errs.name)} aria-invalid={!!errs.name} autoFocus />
+            <FieldError msg={errs.name} />
           </div>
         )}
-        <PlayerPicker ctx={ctx} value={player} onChange={setPlayer} label={team ? 'Contact player (optional)' : 'Player'} />
+        <div className={errs.player ? 'rounded-lg ring-2 ring-red-200 bg-red-50/40 p-2' : ''}>
+          <PlayerPicker ctx={ctx} value={player} onChange={setPlayer} label={team ? 'Contact player (optional)' : 'Player *'} />
+          <FieldError msg={errs.player} />
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Seed (optional)</label>
@@ -466,7 +516,6 @@ function AddEntry({ ctx, t, onClose, onDone }: { ctx: BookingContext; t: Detail;
             )}
           </div>
         )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
     </Modal>
   )

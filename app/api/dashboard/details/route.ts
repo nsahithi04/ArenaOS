@@ -6,6 +6,7 @@ import { resolveRange } from '@/lib/booking/ranges'
 import { handleError, jsonError, requireVenue } from '@/lib/booking/route-helpers'
 import { isLocalDate, localDateOf, localMinutesOf, localRangeToUtc, todayIn } from '@/lib/booking/time'
 import { BOOKING_SOURCES } from '@/lib/booking/validation'
+import { courtLabelSelect, labelOf } from '@/lib/booking/courts'
 
 // GET /api/dashboard/details?kind=…&range=…[&from&to][&date][&courtId][&sportId][&source]
 //
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
         where,
         select: {
           id: true, kind: true, method: true, amount: true, receivedAt: true, bookingId: true,
-          booking: { select: { customer: true, startTime: true, court: { select: { name: true } } } },
+          booking: { select: { customer: true, startTime: true, court: { select: courtLabelSelect } } },
           membership: { select: { player: { select: { name: true } }, plan: { select: { name: true } } } },
           enrollment: { select: { player: { select: { name: true } }, class: { select: { name: true } } } },
           tournamentEntry: { select: { name: true, tournament: { select: { name: true } } } },
@@ -94,7 +95,7 @@ export async function GET(req: Request) {
           bookingId: p.bookingId,
           customer: p.booking?.customer ?? p.membership?.player.name ?? p.enrollment?.player.name ?? p.tournamentEntry?.name ?? '—',
           // For membership/class payments this column describes what was paid for.
-          courtName: p.booking?.court.name
+          courtName: (p.booking && labelOf(p.booking.court))
             ?? (p.membership ? `Membership · ${p.membership.plan.name}`
               : p.enrollment ? `Class · ${p.enrollment.class.name}`
               : `Tournament · ${p.tournamentEntry?.tournament.name ?? ''}`),

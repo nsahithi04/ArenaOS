@@ -48,7 +48,7 @@ export async function createTournament(db: PrismaClient, venueId: string, actorI
           prizes: (input.prizes ?? []) as unknown as Prisma.InputJsonValue, createdById: actorId,
         },
       })
-      const r = await reserveSessions(tx, venueId, { tournamentId: t.id }, { ...t, days: ALL_DAYS }, `Tournament: ${t.name}`, venue.timezone, today, input.skipConflicts, actorId)
+      const r = await reserveSessions(tx, venueId, { tournamentId: t.id }, { ...t, days: ALL_DAYS }, `Tournament: ${t.name}`, venue.timezone, today, input.skipConflicts, actorId, { partial: true })
       return { id: t.id, ...r }
     }, { timeout: 20_000 })
   } catch (err) {
@@ -87,11 +87,11 @@ export async function updateTournament(db: PrismaClient, venueId: string, actorI
         },
       })
       if (scheduleChanged) {
-        const r = await reserveSessions(tx, venueId, { tournamentId: id }, { ...next, days: ALL_DAYS }, `Tournament: ${next.name}`, venue.timezone, todayIn(venue.timezone), input.skipConflicts, actorId)
+        const r = await reserveSessions(tx, venueId, { tournamentId: id }, { ...next, days: ALL_DAYS }, `Tournament: ${next.name}`, venue.timezone, todayIn(venue.timezone), input.skipConflicts, actorId, { partial: true })
         return { id, ...r }
       }
       if (input.name) await tx.courtBlock.updateMany({ where: { tournamentId: id }, data: { reason: `Tournament: ${input.name}` } })
-      return { id, sessions: null, skipped: 0 }
+      return { id, sessions: null, skipped: 0, trimmed: 0 }
     }, { timeout: 20_000 })
   } catch (err) {
     wrap(err)
@@ -118,6 +118,27 @@ async function releaseRemainingCourtTime(tx: Tx, tournamentId: string) {
 
 // ─── Entries ────────────────────────────────────────────────────────────────
 
+const nameKey = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
+const phoneKey = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '').slice(-10)
+
+/**
+ * Refuse a second active entry for the same person: same linked player, same
+ * name (case and spacing ignored) or same phone number. Withdrawn entries don't count.
+ */
+async function assertNotEntered(tx: Tx, tournamentId: string, who: { playerId?: string | null; name?: string | null; phone?: string | null }, excludeId?: string) {
+  const others = await tx.tournamentEntrant.findMany({
+    where: { tournamentId, withdrawn: false, ...(excludeId && { id: { not: excludeId } }) },
+    select: { name: true, playerId: true, phone: true },
+  })
+  const name = who.name ? nameKey(who.name) : ''
+  const phone = phoneKey(who.phone)
+  const dup = others.find((o) =>
+    (who.playerId && o.playerId === who.playerId) || (name && nameKey(o.name) === name) || (phone.length >= 7 && phoneKey(o.phone) === phone))
+  if (!dup) return
+  const why = who.playerId && dup.playerId === who.playerId ? 'This player' : name && nameKey(dup.name) === name ? `"${who.name!.trim()}"` : `Phone ${who.phone}`
+  throw new ServiceError(409, 'ALREADY_ENTERED', `${why} is already entered in this tournament${why.startsWith('Phone') ? ` (as ${dup.name})` : ''}.`)
+}
+
 export async function addEntrant(db: PrismaClient, venueId: string, actorId: string, tournamentId: string, input: EntrantInput) {
   return db.$transaction(async (tx) => {
     const t = await lockTournament(tx, venueId, tournamentId)
@@ -128,8 +149,16 @@ export async function addEntrant(db: PrismaClient, venueId: string, actorId: str
       const taken = await tx.tournamentEntrant.findFirst({ where: { tournamentId, seed: input.seed, withdrawn: false } })
       if (taken) throw new ServiceError(409, 'SEED_TAKEN', `Seed ${input.seed} is already given to ${taken.name}.`)
     }
-    const player = input.player ? await resolvePlayer(tx, venueId, input.player) : null
     if (input.payment && input.payment.amount > Number(t.entryFee)) throw new ServiceError(422, 'OVERPAYMENT', 'Payment cannot exceed the entry fee.')
+    // Check before a new player record is created, so a refused entry leaves nothing behind.
+    const existing = input.player && 'playerId' in input.player ? await tx.player.findFirst({ where: { id: input.player.playerId, venueId } }) : null
+    const newP = input.player && 'newPlayer' in input.player ? input.player.newPlayer : null
+    await assertNotEntered(tx, tournamentId, {
+      playerId: existing?.id ?? null,
+      name: input.name || existing?.name || newP?.name || null,
+      phone: input.phone ?? existing?.phone ?? newP?.phone ?? null,
+    })
+    const player = input.player ? await resolvePlayer(tx, venueId, input.player) : null
     const entrant = await tx.tournamentEntrant.create({
       data: {
         tournamentId, venueId, name: input.name || player!.name, playerId: player?.id ?? null,
@@ -152,6 +181,10 @@ export async function updateEntrant(db: PrismaClient, venueId: string, entrantId
     if (input.seed != null) {
       const taken = await tx.tournamentEntrant.findFirst({ where: { tournamentId: t.id, seed: input.seed, withdrawn: false, NOT: { id: e.id } } })
       if (taken) throw new ServiceError(409, 'SEED_TAKEN', `Seed ${input.seed} is already given to ${taken.name}.`)
+    }
+    // Renaming, or bringing a withdrawn entry back, must not create a duplicate.
+    if (input.name || (input.withdrawn === false && e.withdrawn)) {
+      await assertNotEntered(tx, t.id, { playerId: e.playerId, name: input.name ?? e.name, phone: e.phone }, e.id)
     }
     return tx.tournamentEntrant.update({
       where: { id: e.id },
@@ -183,7 +216,7 @@ export async function drawBracket(db: PrismaClient, venueId: string, tournamentI
   return db.$transaction(async (tx) => {
     const t = await lockTournament(tx, venueId, tournamentId)
     if (t.status === 'CANCELLED' || t.status === 'COMPLETED') throw new ServiceError(422, 'CLOSED', `This tournament is ${t.status.toLowerCase()}.`)
-    const played = await tx.tournamentMatch.count({ where: { tournamentId, status: 'COMPLETED', NOT: { score: 'Bye' } } })
+    const played = await tx.tournamentMatch.count({ where: { tournamentId, status: 'COMPLETED', OR: [{ score: null }, { score: { not: 'Bye' } }] } })
     if (played) throw new ServiceError(422, 'RESULTS_EXIST', 'Results have been recorded; the draw can no longer be redone.')
     const entrants = await tx.tournamentEntrant.findMany({ where: { tournamentId, withdrawn: false }, orderBy: { createdAt: 'asc' } })
     if (entrants.length < 2) throw new ServiceError(422, 'NOT_ENOUGH_ENTRIES', 'At least 2 entries are needed for a draw.')
@@ -195,6 +228,23 @@ export async function drawBracket(db: PrismaClient, venueId: string, tournamentI
     await tx.tournamentMatch.createMany({ data: matches.map((m) => ({ tournamentId, ...m })) })
     await tx.tournament.update({ where: { id: tournamentId }, data: { status: 'IN_PROGRESS', winnerEntrantId: null } })
     return { matches: matches.length, rounds: roundsFor(pool.length) }
+  })
+}
+
+/**
+ * Undo the draw and take entries again. Only before any real result is recorded
+ * (byes don't count); the bracket is discarded and is made again later.
+ */
+export async function reopenRegistration(db: PrismaClient, venueId: string, tournamentId: string) {
+  return db.$transaction(async (tx) => {
+    const t = await lockTournament(tx, venueId, tournamentId)
+    if (t.status === 'REGISTRATION') return { status: t.status }
+    if (t.status !== 'IN_PROGRESS') throw new ServiceError(422, 'CLOSED', `This tournament is ${t.status.toLowerCase()}.`)
+    const played = await tx.tournamentMatch.count({ where: { tournamentId, status: 'COMPLETED', OR: [{ score: null }, { score: { not: 'Bye' } }] } })
+    if (played) throw new ServiceError(422, 'RESULTS_EXIST', `${played} result${played === 1 ? ' has' : 's have'} been recorded, so registration can't be reopened. Undo ${played === 1 ? 'it' : 'them'} first.`)
+    await tx.tournamentMatch.deleteMany({ where: { tournamentId } })
+    await tx.tournament.update({ where: { id: tournamentId }, data: { status: 'REGISTRATION', winnerEntrantId: null } })
+    return { status: 'REGISTRATION' as const }
   })
 }
 

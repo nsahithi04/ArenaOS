@@ -9,6 +9,7 @@
 //     reject any overlapping row that slips past (e.g. a direct SQL write).
 
 import { Prisma, type PrismaClient } from '@prisma/client'
+import { courtLabel, courtLabelSelect, labelOf } from './courts'
 import { checkOperatingHours, type HoursRow } from './availability'
 import { ConflictError, isExclusionViolation, ServiceError } from './errors'
 import { quotePrice, type PriceQuote, type PricingRuleInput } from './pricing'
@@ -31,7 +32,7 @@ export type VenueConfig = {
   name: string
   timezone: string
   currency: string
-  courts: { id: string; name: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
+  courts: { id: string; name: string; label: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
   sports: { id: string; name: string; emoji: string | null }[]
   hours: HoursRow[]
   pricing: PricingRuleInput[]
@@ -42,7 +43,7 @@ export async function loadVenueConfig(db: PrismaClient | Tx, venueId: string): P
     where: { id: venueId },
     select: {
       id: true, name: true, timezone: true, currency: true,
-      courts: { select: { id: true, name: true, sportId: true, isActive: true, isAvailable: true, type: true }, orderBy: { name: 'asc' } },
+      courts: { select: { id: true, name: true, sportId: true, isActive: true, isAvailable: true, type: true, sport: { select: { name: true } } }, orderBy: { name: 'asc' } },
       sports: { select: { id: true, name: true, emoji: true }, orderBy: { name: 'asc' } },
       operatingHours: { select: { sportId: true, day: true, openTime: true, closeTime: true, isClosed: true } },
       pricingRules: { select: { id: true, label: true, sportId: true, courtId: true, days: true, startTime: true, endTime: true, priceUsd: true } },
@@ -54,7 +55,7 @@ export async function loadVenueConfig(db: PrismaClient | Tx, venueId: string): P
     name: v.name,
     timezone: v.timezone,
     currency: v.currency,
-    courts: v.courts.map((c) => ({ ...c, type: String(c.type) })),
+    courts: v.courts.map(({ sport, ...c }) => ({ ...c, label: courtLabel(c.name, sport?.name), type: String(c.type) })),
     sports: v.sports,
     hours: v.operatingHours.map((h) => ({ ...h, day: String(h.day) })),
     pricing: v.pricingRules.map((r) => ({ ...r, priceUsd: r.priceUsd.toString() })),
@@ -79,13 +80,18 @@ async function assertSlotFree(tx: Tx, courtId: string, start: Date, end: Date, t
       endTime: { gt: start },
       ...(excludeBookingId && { id: { not: excludeBookingId } }),
     },
-    select: { id: true, startTime: true, endTime: true },
+    select: { id: true, startTime: true, endTime: true, customer: true },
     orderBy: { startTime: 'asc' },
   })
+  const where = async () => {
+    const c = await tx.court.findUnique({ where: { id: courtId }, select: courtLabelSelect })
+    const day = new Date(`${localDateOf(start, tz)}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+    return `${c ? labelOf(c) : 'This court'} on ${day}`
+  }
   if (clash) {
     const s = formatMinutes(localMinutesOf(clash.startTime, tz))
     const e = formatMinutes(localMinutesOf(clash.endTime, tz))
-    throw new ConflictError(`This court is already booked from ${s} to ${e}.`, {
+    throw new ConflictError(`${await where()} is already booked by ${clash.customer} from ${s} to ${e}.`, {
       conflictType: 'booking',
       conflictBookingId: clash.id,
       start: clash.startTime.toISOString(),
@@ -99,7 +105,7 @@ async function assertSlotFree(tx: Tx, courtId: string, start: Date, end: Date, t
   if (block) {
     const s = formatMinutes(localMinutesOf(block.startTime, tz))
     const e = formatMinutes(localMinutesOf(block.endTime, tz))
-    throw new ConflictError(`This court is blocked${block.reason ? ` (${block.reason})` : ''} from ${s} to ${e}.`, {
+    throw new ConflictError(`${await where()} is blocked${block.reason ? ` for ${block.reason}` : ''} from ${s} to ${e}.`, {
       conflictType: 'block',
       blockId: block.id,
       start: block.startTime.toISOString(),

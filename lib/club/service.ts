@@ -12,6 +12,7 @@ import { lockCourts } from '@/lib/booking/service'
 import { formatMinutes, localMinutesOf, todayIn, zonedToUtc } from '@/lib/booking/time'
 import { membershipEndDate, sessionDates } from './schedule'
 import type { ClassInput, EnrollInput, PlanInput, PlayerRef, SellMembershipInput } from './validation'
+import { courtLabelSelect, labelOf } from '@/lib/booking/courts'
 
 type Tx = Prisma.TransactionClient
 const dec = (n: number) => new Prisma.Decimal(n.toFixed(2))
@@ -138,7 +139,20 @@ export type SessionConflict = { date: string; courtId: string; courtName: string
 /** What a reserved court block belongs to. */
 export type BlockOwner = { classId: string } | { tournamentId: string }
 
-async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: string, exclude?: BlockOwner): Promise<SessionConflict[]> {
+/**
+ * Blocks not belonging to `owner`. Spelled out with an explicit null branch because
+ * Prisma's `NOT: { tournamentId: x }` becomes SQL `NOT (col = x)`, which also drops
+ * every row where the column is NULL (class and maintenance blocks).
+ */
+function notOwnedBy(owner: BlockOwner) {
+  return 'classId' in owner
+    ? { OR: [{ classId: null }, { classId: { not: owner.classId } }] }
+    : { OR: [{ tournamentId: null }, { tournamentId: { not: owner.tournamentId } }] }
+}
+
+type Clash = SessionConflict & { start: Date; end: Date }
+
+async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: string, exclude?: BlockOwner): Promise<Clash[]> {
   if (!sessions.length) return []
   const min = new Date(Math.min(...sessions.map((s) => +s.start)))
   const max = new Date(Math.max(...sessions.map((s) => +s.end)))
@@ -149,23 +163,23 @@ async function findConflicts(tx: Tx, venueId: string, sessions: Session[], tz: s
       select: { courtId: true, startTime: true, endTime: true, customer: true },
     }),
     tx.courtBlock.findMany({
-      where: { venueId, courtId: { in: courtIds }, startTime: { lt: max }, endTime: { gt: min }, ...(exclude && { NOT: exclude }) },
+      where: { venueId, courtId: { in: courtIds }, startTime: { lt: max }, endTime: { gt: min }, ...(exclude && notOwnedBy(exclude)) },
       select: { courtId: true, startTime: true, endTime: true, reason: true },
     }),
-    tx.court.findMany({ where: { id: { in: courtIds } }, select: { id: true, name: true } }),
+    tx.court.findMany({ where: { id: { in: courtIds } }, select: { id: true, ...courtLabelSelect } }),
   ])
-  const name = new Map(courts.map((c) => [c.id, c.name]))
+  const name = new Map(courts.map((c) => [c.id, labelOf(c)]))
   const fmt = (d: Date) => formatMinutes(localMinutesOf(d, tz))
-  const out: SessionConflict[] = []
+  const out: Clash[] = []
   for (const s of sessions) {
     for (const b of bookings) {
       if (b.courtId === s.courtId && b.startTime < s.end && b.endTime > s.start) {
-        out.push({ date: s.date, courtId: s.courtId, courtName: name.get(s.courtId) ?? '', what: `Booking: ${b.customer}`, time: `${fmt(b.startTime)} – ${fmt(b.endTime)}` })
+        out.push({ date: s.date, courtId: s.courtId, courtName: name.get(s.courtId) ?? '', what: `Booking: ${b.customer}`, time: `${fmt(b.startTime)} – ${fmt(b.endTime)}`, start: b.startTime, end: b.endTime })
       }
     }
     for (const b of blocks) {
       if (b.courtId === s.courtId && b.startTime < s.end && b.endTime > s.start) {
-        out.push({ date: s.date, courtId: s.courtId, courtName: name.get(s.courtId) ?? '', what: b.reason ?? 'Blocked', time: `${fmt(b.startTime)} – ${fmt(b.endTime)}` })
+        out.push({ date: s.date, courtId: s.courtId, courtName: name.get(s.courtId) ?? '', what: b.reason ?? 'Blocked', time: `${fmt(b.startTime)} – ${fmt(b.endTime)}`, start: b.startTime, end: b.endTime })
       }
     }
   }
@@ -177,27 +191,73 @@ export async function validateCourts(db: PrismaClient | Tx, venueId: string, cou
   if (courts.length !== courtIds.length) throw new ServiceError(422, 'COURT_NOT_FOUND', 'One or more courts are not active courts of this venue')
 }
 
-/** Replace a class's future sessions (from `fromDate`) with ones matching its current schedule. */
+function dayLabel(date: string) {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
+/** "Court 1 · Pickleball, Fri Nov 13, 9:00 AM – 6:00 PM (Tournament: win0win)" for the first few clashes. */
+export function describeConflicts(conflicts: SessionConflict[], max = 3) {
+  const parts = conflicts.slice(0, max).map((c) => `${c.courtName} on ${dayLabel(c.date)}, ${c.time} (${c.what})`)
+  const more = conflicts.length - parts.length
+  return parts.join('; ') + (more > 0 ? `; and ${more} more` : '')
+}
+
+const MIN_SEGMENT_MS = 15 * 60_000
+
+/** The parts of [start, end) not covered by any of `busy`, keeping pieces of at least 15 minutes. */
+export function freeSegments(start: Date, end: Date, busy: { start: Date; end: Date }[]) {
+  const sorted = busy.filter((b) => b.start < end && b.end > start).sort((a, b) => +a.start - +b.start)
+  const out: { start: Date; end: Date }[] = []
+  let cursor = +start
+  for (const b of sorted) {
+    if (+b.start > cursor) out.push({ start: new Date(cursor), end: new Date(Math.min(+b.start, +end)) })
+    cursor = Math.max(cursor, +b.end)
+    if (cursor >= +end) break
+  }
+  if (cursor < +end) out.push({ start: new Date(cursor), end })
+  return out.filter((s) => +s.end - +s.start >= MIN_SEGMENT_MS)
+}
+
 /**
  * Replace the future court reservations of a class or tournament (from `fromDate`)
  * with ones matching its schedule. Takes the per-court locks, reports clashes
- * (409 with the list) unless `skipConflicts`, then writes the CourtBlock rows.
+ * (409 naming each one) unless `skipConflicts`, then writes the CourtBlock rows.
+ *
+ * Clashing sessions are handled in one of two ways when skipping:
+ * - `partial: false` (classes): the whole session on that court is left out.
+ * - `partial: true` (tournaments): the court is reserved only for the free time
+ *   around whatever is already there, e.g. 9–5 and 6–6 around a 5–6 class.
  */
-export async function reserveSessions(tx: Tx, venueId: string, owner: BlockOwner, spec: Parameters<typeof buildSessions>[0], label: string, tz: string, fromDate: string, skipConflicts: boolean, actorId: string) {
+export async function reserveSessions(tx: Tx, venueId: string, owner: BlockOwner, spec: Parameters<typeof buildSessions>[0], label: string, tz: string, fromDate: string, skipConflicts: boolean, actorId: string, opts: { partial?: boolean } = {}) {
   const sessions = buildSessions(spec, tz, fromDate)
   await lockCourts(tx, [...new Set(spec.courtIds)])
   const fromInstant = zonedToUtc(fromDate, 0, tz)
   await tx.courtBlock.deleteMany({ where: { ...owner, startTime: { gte: fromInstant } } })
-  const conflicts = await findConflicts(tx, venueId, sessions, tz, owner)
-  if (conflicts.length && !skipConflicts) {
-    throw new ConflictError(`${conflicts.length} session${conflicts.length === 1 ? '' : 's'} clash with existing bookings or blocks.`, { conflicts: conflicts.slice(0, 100) })
+  const clashes = await findConflicts(tx, venueId, sessions, tz, owner)
+  const conflicts: SessionConflict[] = clashes.map(({ start: _s, end: _e, ...c }) => c)
+  if (clashes.length && !skipConflicts) {
+    const n = clashes.length
+    throw new ConflictError(`${n} clash${n === 1 ? '' : 'es'} with existing bookings or blocks: ${describeConflicts(conflicts)}.`, { conflicts: conflicts.slice(0, 100), partial: !!opts.partial })
   }
-  const clash = new Set(conflicts.map((c) => `${c.date}|${c.courtId}`))
-  const rows = sessions
-    .filter((s) => !clash.has(`${s.date}|${s.courtId}`))
-    .map((s) => ({ venueId, courtId: s.courtId, startTime: s.start, endTime: s.end, ...owner, reason: label, createdById: actorId }))
+  const busy = new Map<string, Clash[]>()
+  for (const c of clashes) {
+    const k = `${c.date}|${c.courtId}`
+    busy.set(k, [...(busy.get(k) ?? []), c])
+  }
+  const rows: { venueId: string; courtId: string; startTime: Date; endTime: Date; reason: string; createdById: string; classId?: string; tournamentId?: string }[] = []
+  let skipped = 0
+  let trimmed = 0
+  for (const s of sessions) {
+    const inWay = busy.get(`${s.date}|${s.courtId}`)
+    if (!inWay) { rows.push({ venueId, courtId: s.courtId, startTime: s.start, endTime: s.end, ...owner, reason: label, createdById: actorId }); continue }
+    if (!opts.partial) { skipped++; continue }
+    const free = freeSegments(s.start, s.end, inWay)
+    if (!free.length) { skipped++; continue }
+    trimmed++
+    for (const f of free) rows.push({ venueId, courtId: s.courtId, startTime: f.start, endTime: f.end, ...owner, reason: label, createdById: actorId })
+  }
   if (rows.length) await tx.courtBlock.createMany({ data: rows })
-  return { sessions: rows.length, skipped: clash.size }
+  return { sessions: rows.length, skipped, trimmed }
 }
 
 function wrap(err: unknown): never {
@@ -256,7 +316,7 @@ export async function updateClass(db: PrismaClient, venueId: string, actorId: st
         return { id: cls.id, ...r }
       }
       if (input.name) await tx.courtBlock.updateMany({ where: { classId: cls.id }, data: { reason: `Class: ${input.name}` } })
-      return { id: cls.id, sessions: null, skipped: 0 }
+      return { id: cls.id, sessions: null, skipped: 0, trimmed: 0 }
     }, { timeout: 20_000 })
   } catch (err) {
     wrap(err)

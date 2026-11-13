@@ -54,7 +54,7 @@ describe.skipIf(!enabled)('booking engine (database)', () => {
     const err = await create({ startMin: 10 * 60 + 30, endMin: 11 * 60 + 30 }).catch((e) => e)
     expect(err).toBeInstanceOf(ConflictError)
     expect(err.status).toBe(409)
-    expect(err.message).toBe('This court is already booked from 10:00 AM to 11:00 AM.')
+    expect(err.message).toMatch(/^Court 1 · .+ on \w{3}, \w{3} \d+ is already booked by .+ from 10:00 AM to 11:00 AM\.$/)
   })
 
   it('allows back-to-back bookings and the same slot on another court', async () => {

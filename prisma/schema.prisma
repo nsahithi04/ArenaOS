@@ -80,6 +80,7 @@ model User {
   bookingsCreated    Booking[]          @relation("BookingCreatedBy")
   paymentsRecorded   Payment[]          @relation("PaymentRecordedBy")
   courtBlocksCreated CourtBlock[]       @relation("CourtBlockCreatedBy")
+  notifications      Notification[]
 }
 
 model NotificationPrefs {
@@ -162,6 +163,10 @@ model Venue {
   classes         Class[]
   venueRoles      VenueRole[]
   tournaments     Tournament[]
+  shifts          Shift[]
+  timeEntries     TimeEntry[]
+  payrollPayouts  PayrollPayout[]
+  notifications   Notification[]
   venueMembers    VenueMember[]
 }
 
@@ -202,10 +207,17 @@ model VenueMember {
   inviteToken  String?   @unique
   inviteExpiry DateTime?
   createdAt    DateTime  @default(now())
+  // Staff pay (set by the owner / managers). null = not on payroll.
+  payType      PayType?
+  payRate      Decimal?  @db.Decimal(10, 2) // per hour (HOURLY) or per month (MONTHLY)
+  position     String? // job title, e.g. "Front desk", "Coach"
 
-  venue Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  role  VenueRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  user  User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue          Venue           @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  role           VenueRole?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shifts         Shift[]
+  timeEntries    TimeEntry[]
+  payrollPayouts PayrollPayout[]
 
   @@unique([venueId, email])
 }
@@ -726,4 +738,100 @@ model TournamentMatch {
   winner     TournamentEntrant? @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
 
   @@unique([tournamentId, round, position])
+}
+
+// ─── Staff: shifts, time sheets, payroll, notifications ──────────────────────
+
+enum PayType {
+  HOURLY
+  MONTHLY
+}
+
+// A scheduled shift. Drafts (published = false) are only visible to managers;
+// publishing notifies the staff member. One person can't have overlapping shifts
+// ("Shift_no_overlap" exclusion constraint).
+model Shift {
+  id          String    @id @default(cuid())
+  venueId     String
+  memberId    String
+  date        String // venue-local 'YYYY-MM-DD'
+  startTime   DateTime
+  endTime     DateTime
+  position    String?
+  notes       String?
+  published   Boolean   @default(false)
+  // Set when the published version has been sent; cleared when the shift changes
+  notifiedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  venue       Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  member      VenueMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  timeEntries TimeEntry[]
+
+  @@index([venueId, date])
+  @@index([memberId, startTime])
+}
+
+// Clock-in / clock-out record. clockOut null = currently on the clock
+// (at most one open entry per person: "TimeEntry_one_open" unique index).
+model TimeEntry {
+  id          String    @id @default(cuid())
+  venueId     String
+  memberId    String
+  shiftId     String?
+  clockIn     DateTime
+  clockOut    DateTime?
+  note        String?
+  // true when added or corrected by a manager rather than clocked by the person
+  manual      Boolean   @default(false)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  venue  Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  member VenueMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  shift  Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  @@index([venueId, clockIn])
+  @@index([memberId, clockIn])
+}
+
+// Money paid to a staff member for a pay period.
+model PayrollPayout {
+  id           String        @id @default(cuid())
+  venueId      String
+  memberId     String
+  periodStart  String // venue-local dates, inclusive
+  periodEnd    String
+  amount       Decimal       @db.Decimal(10, 2)
+  method       PaymentMethod
+  paidAt       DateTime      @default(now())
+  note         String?
+  recordedById String?
+  createdAt    DateTime      @default(now())
+
+  venue  Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  member VenueMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, paidAt])
+  @@index([memberId, periodStart])
+}
+
+// In-app notification shown under the bell.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  venueId   String?
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue Venue? @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

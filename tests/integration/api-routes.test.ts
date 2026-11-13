@@ -135,11 +135,11 @@ describe.skipIf(!enabled)('booking API routes', () => {
     as(A.owner.id)
     let items = (await (await bookings.GET(get(q))).json()).items
     expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({ date: DATE, startMin: 1080, endMin: 1170, courtName: 'Court 1', amount: 45, status: 'CONFIRMED' })
+    expect(items[0]).toMatchObject({ date: DATE, startMin: 1080, endMin: 1170, courtName: expect.stringMatching(/^Court 1 · /), amount: 45, status: 'CONFIRMED' })
 
     await bookingById.PATCH(patch(`/api/bookings/${id}`, { courtId: A.court2.id, date: DATE, start: '07:00', end: '08:00' }), params(id))
     items = (await (await bookings.GET(get(q))).json()).items
-    expect(items[0]).toMatchObject({ courtName: 'Court 2', startMin: 420, amount: 20 })
+    expect(items[0]).toMatchObject({ courtName: expect.stringMatching(/^Court 2 · /), startMin: 420, amount: 20 })
 
     await bookingById.PATCH(patch(`/api/bookings/${id}`, { status: 'CANCELLED' }), params(id))
     items = (await (await bookings.GET(get(`${q}&status=CONFIRMED,PENDING`))).json()).items
@@ -173,6 +173,26 @@ describe.skipIf(!enabled)('booking API routes', () => {
     expect((await prisma.booking.findUniqueOrThrow({ where: { id } })).courtId).toBe(venue.court1.id)
   })
 
+  it('court names may repeat across sports but not within a sport', async () => {
+    const { POST: saveCourts } = await import('@/app/api/venues/[id]/courts/route')
+    const venue = await seedVenue(`names${Date.now()}`)
+    const badminton = await prisma.sport.create({ data: { venueId: venue.venue.id, name: 'Badminton' } })
+    as(venue.owner.id)
+    const court = (name: string, sportId: string, id?: string) => ({ id, name, type: 'Indoor', capacity: 4, description: '', sportId })
+    const dup = await saveCourts(post(`/api/venues/${venue.venue.id}/courts`, { courts: [
+      court('Court 1', venue.sport.id, venue.court1.id), court('court 1 ', venue.sport.id, venue.court2.id),
+    ] }), params(venue.venue.id))
+    expect(dup.status).toBe(422)
+    const body = await dup.json()
+    expect(body.error).toBe('Two Pickleball courts are named "court 1". Use a different name for each court of the same sport.')
+    expect(body.problems).toEqual([expect.objectContaining({ index: 1 })])
+    const ok = await saveCourts(post(`/api/venues/${venue.venue.id}/courts`, { courts: [
+      court('Court 1', venue.sport.id, venue.court1.id), court('Court 2', venue.sport.id, venue.court2.id), court('Court 1', badminton.id),
+    ] }), params(venue.venue.id))
+    expect(ok.status).toBe(200)
+    expect(await prisma.court.count({ where: { venueId: venue.venue.id, name: 'Court 1', isActive: true } })).toBe(2)
+  })
+
   it('dashboard revenue uses payment records and updates after changes', async () => {
     const range = `/api/dashboard?venueId=${A.venue.id}&range=custom&from=${DATE}&to=${DATE}`
     const a = await (await createVia(A.owner.id, A.venue.id, A.court1.id, { start: '16:00', end: '18:00', source: 'PLAYO' })).json() // 50
@@ -188,7 +208,7 @@ describe.skipIf(!enabled)('booking API routes', () => {
     expect(d.current.channel.online).toEqual({ bookings: 1, gross: 50 })
     expect(d.current.channel.offline).toEqual({ bookings: 2, gross: 50 })
     expect(d.current.bySport).toEqual([expect.objectContaining({ name: 'Pickleball', gross: 100, bookings: 3 })])
-    expect(d.current.byCourt.map((x: { name: string; gross: number }) => [x.name, x.gross]).sort()).toEqual([['Court 1', 50], ['Court 2', 50]])
+    expect(d.current.byCourt.map((x: { name: string; gross: number }) => [x.name, x.gross]).sort()).toEqual([['Court 1 · Pickleball', 50], ['Court 2 · Pickleball', 50]])
 
     await payments.POST(post(`/api/bookings/${a.id}/payments`, { method: 'UPI', amount: 50 }), params(a.id))
     await bookingById.PATCH(patch(`/api/bookings/${c.id}`, { status: 'CANCELLED' }), params(c.id))

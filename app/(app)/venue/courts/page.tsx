@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { courtNameProblems } from '@/lib/booking/courts'
 import { Plus, Trash2, Building2, ChevronDown, ChevronUp, ImageIcon, X, Save, Check } from 'lucide-react'
 
 type CourtImage = { preview: string; url: string | null; uploading: boolean }
@@ -167,10 +168,19 @@ export default function CourtsSettingsPage() {
 
   const totalCourts = sports.reduce((acc, s) => acc + s.courts.length, 0)
 
+  // Blank or same-sport duplicate court names, keyed by sportId:courtRowId.
+  const nameErrors = new Map<string, string>()
+  for (const s of sports) {
+    for (const p of courtNameProblems(s.courts.map((c) => ({ name: c.name, sportId: s.sportId })), () => s.sportName)) {
+      nameErrors.set(`${s.sportId}:${s.courts[p.index].id}`, p.message)
+    }
+  }
+
   async function handleSave() {
     if (!venueId) return
     const uploading = sports.some((s) => s.courts.some((c) => c.images.some((img) => img.uploading)))
     if (uploading) { setError('Please wait for uploads to finish'); return }
+    if (nameErrors.size) { setError(`Fix the highlighted court name${nameErrors.size > 1 ? 's' : ''}: ${[...nameErrors.values()][0]}`); return }
     setError(''); setSaving(true)
     try {
       const allCourts = sports.flatMap((s) =>
@@ -265,7 +275,9 @@ export default function CourtsSettingsPage() {
                         <div>
                           <label className="block text-xs font-medium text-muted-foreground mb-1">Court Name</label>
                           <input value={court.name} onChange={(e) => updateCourt(sport.sportId, court.id, 'name', e.target.value)}
-                            className="w-full px-3 py-1.5 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                            aria-invalid={nameErrors.has(`${sport.sportId}:${court.id}`)}
+                            className={`w-full px-3 py-1.5 rounded-lg border bg-white text-sm outline-none focus:ring-2 ${nameErrors.has(`${sport.sportId}:${court.id}`) ? 'border-red-400 ring-2 ring-red-100 focus:ring-red-200' : 'border-border focus:ring-primary/20 focus:border-primary'}`} />
+                          {nameErrors.has(`${sport.sportId}:${court.id}`) && <p className="mt-1 text-[11px] text-red-600">{nameErrors.get(`${sport.sportId}:${court.id}`)}</p>}
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-muted-foreground mb-1">Type</label>

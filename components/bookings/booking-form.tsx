@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { AlertTriangle, BadgeCheck, CheckCircle2, Clock } from 'lucide-react'
 import { PlayerPicker, type PlayerChoice } from '@/components/club/player-picker'
 import {
-  api, ApiError, BRAND_GRADIENT, inputCls, METHODS, Modal, money, SOURCES, Spinner, hhmm, parseHHmm, fmtDuration, fmtTime,
+  api, ApiError, BRAND_GRADIENT, fieldCls, FormProblems, inputCls, METHODS, Modal, money, SOURCES, Spinner, hhmm, parseHHmm, fmtDuration, fmtTime,
   nowMinutesIn, earliestEditableDate,
   type Booking, type BookingContext, type BookingSource, type PaymentMethod,
 } from './shared'
@@ -240,6 +240,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
       }
     >
       <div className="space-y-4">
+        <FormProblems errors={fieldErrors} message={error} />
         {isNew && (
           <div>
             <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
@@ -274,17 +275,17 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               {label('Customer name', true)}
-              <input value={customer} onChange={(e) => setCustomer(e.target.value)} maxLength={120} className={inputCls} placeholder={mode === 'walkin' ? 'Walk-in customer' : 'Full name'} autoFocus />
+              <input value={customer} onChange={(e) => setCustomer(e.target.value)} maxLength={120} className={fieldCls(fieldErrors.customer)} aria-invalid={!!fieldErrors.customer} placeholder={mode === 'walkin' ? 'Walk-in customer' : 'Full name'} autoFocus />
               {err('customer')}
             </div>
             <div>
               {label('Phone')}
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} inputMode="tel" className={inputCls} placeholder="+1 555 123 4567" />
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} inputMode="tel" className={fieldCls(fieldErrors.phone)} aria-invalid={!!fieldErrors.phone} placeholder="+1 555 123 4567" />
               {err('phone')}
             </div>
             <div>
               {label('Email')}
-              <input value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} type="email" className={inputCls} placeholder="name@example.com" />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} type="email" className={fieldCls(fieldErrors.email)} aria-invalid={!!fieldErrors.email} placeholder="name@example.com" />
               {err('email')}
             </div>
           </div>
@@ -302,21 +303,21 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
           )}
           <div className={scheduleOnly ? 'sm:col-span-2' : ''}>
             {label('Court', true)}
-            <select value={courtId} onChange={(e) => setCourtId(e.target.value)} className={inputCls}>
+            <select value={courtId} onChange={(e) => setCourtId(e.target.value)} className={fieldCls(fieldErrors.courtId || (blocked && scheduleChanged))} aria-invalid={!!fieldErrors.courtId}>
               {courtsForSport.length === 0 && <option value="">No courts for this sport</option>}
-              {courtsForSport.map((c) => <option key={c.id} value={c.id} disabled={!c.isAvailable}>{c.name}{!c.isAvailable ? ' (unavailable)' : ''}</option>)}
+              {courtsForSport.map((c) => <option key={c.id} value={c.id} disabled={!c.isAvailable}>{c.label}{!c.isAvailable ? ' (unavailable)' : ''}</option>)}
             </select>
             {err('courtId')}
           </div>
           <div>
             {label('Date', true)}
-            <input type="date" value={date} min={earliestEditableDate(ctx)} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+            <input type="date" value={date} min={earliestEditableDate(ctx)} onChange={(e) => setDate(e.target.value)} className={fieldCls(fieldErrors.date)} aria-invalid={!!fieldErrors.date} />
             {err('date')}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               {label('Start', true)}
-              <input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={inputCls} />
+              <input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={fieldCls(fieldErrors.start || fieldErrors.end || (blocked && scheduleChanged))} aria-invalid={!!(fieldErrors.start || fieldErrors.end)} />
             </div>
             <div>
               {label('Duration', true)}
@@ -382,7 +383,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
                 {quote && !overridePrice && <span className="text-muted-foreground">(calculated: {money(quote.amount, currency)})</span>}
               </label>
               {overridePrice && (
-                <input type="number" min={0} step="0.01" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} className={`${inputCls} mt-2 sm:w-40`} placeholder="0.00" />
+                <input type="number" min={0} step="0.01" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} className={`${fieldCls(fieldErrors.amount)} mt-2 sm:w-40`} placeholder="0.00" />
               )}
               {err('amount')}
               {!isNew && booking && scheduleChanged && booking.priceOverridden && !overridePrice && (
@@ -405,7 +406,7 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
                     </div>
                     <div>
                       {label('Amount received')}
-                      <input type="number" min={0} step="0.01" value={payAmount} onChange={(e) => { setPayAmount(e.target.value); setPayAmountTouched(true) }} className={inputCls} />
+                      <input type="number" min={0} step="0.01" value={payAmount} onChange={(e) => { setPayAmount(e.target.value); setPayAmountTouched(true) }} className={fieldCls(fieldErrors['initialPayment.amount'])} />
                     </div>
                   </div>
                 )}
@@ -420,7 +421,6 @@ export function BookingForm({ ctx, mode, booking, prefill, onClose, onSaved }: {
           </>
         )}
 
-        {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
       </div>
     </Modal>
   )

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireVenue } from '@/lib/booking/route-helpers'
 import { prisma } from '@/lib/db'
+import { courtNameProblems } from '@/lib/booking/courts'
 
 type CourtPayload = { id?: string; name: string; type: string; capacity: number; description: string; sportId: string; images?: string[] }
 
@@ -19,6 +20,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const { courts } = (await req.json()) as { courts: CourtPayload[] }
     if (!Array.isArray(courts)) return NextResponse.json({ error: 'courts must be an array' }, { status: 400 })
+    const sports = await prisma.sport.findMany({ where: { venueId: id }, select: { id: true, name: true } })
+    const problems = courtNameProblems(courts, (sid) => sports.find((s) => s.id === sid)?.name ?? '')
+    if (problems.length) return NextResponse.json({ error: problems[0].message, code: 'COURT_NAME', problems }, { status: 422 })
 
     await prisma.$transaction(async (tx) => {
       const existing = await tx.court.findMany({ where: { venueId: id }, select: { id: true } })
@@ -28,7 +32,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       for (const c of courts) {
         const data = {
           sportId: c.sportId || null,
-          name: c.name,
+          name: c.name.trim().replace(/\s+/g, ' '),
           type: c.type === 'Outdoor' ? ('OUTDOOR' as const) : ('INDOOR' as const),
           capacity: c.capacity,
           description: c.description || null,

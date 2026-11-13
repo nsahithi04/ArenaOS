@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarDays, Clock, GraduationCap, Pencil, Plus, UserMinus, Users, Wallet } from 'lucide-react'
+import { CalendarDays, Clock, GraduationCap, Pencil, Plus, UserMinus, Users, Wallet } from 'lucide-react'
 import {
-  api, ApiError, BRAND_GRADIENT, ConfirmDialog, ErrorState, fmtDate, fmtTime, hhmm, inputCls, METHODS, Modal, money, parseHHmm, Spinner, useBookingContext,
-  type BookingContext, type PaymentMethod,
+  api, ApiError, BRAND_GRADIENT, ConfirmDialog, ErrorState, FieldError, fieldCls, fmtDate, fmtTime, FormProblems, hhmm, inputCls, METHODS, Modal, money, parseHHmm, Spinner, useBookingContext,
+  type BookingContext, type Conflict, type PaymentMethod,
 } from '@/components/bookings/shared'
 import { PlayerPicker, playerPayload, type PlayerChoice } from '@/components/club/player-picker'
 import { formatDays, WEEKDAYS } from '@/lib/club/schedule'
@@ -19,7 +19,6 @@ type ClassDetail = Omit<ClassRow, 'courtNames' | 'enrolled' | 'nextSession' | 's
   currency: string; upcomingSessions: number
   students: { id: string; playerId: string; name: string; phone: string | null; status: 'ACTIVE' | 'WITHDRAWN'; enrolledAt: string; paid: number }[]
 }
-type Conflict = { date: string; courtName: string; what: string; time: string }
 
 const CLASS_COLOR = '#7c3aed'
 const feeLabel = (fee: number, period: string, cur: string) => `${money(fee, cur)} / ${period === 'MONTH' ? 'month' : 'term'}`
@@ -134,18 +133,33 @@ function ClassForm({ ctx, cls, onClose, onDone }: { ctx: BookingContext; cls: Cl
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null)
+  const [tried, setTried] = useState(false)
+  const [serverFields, setServerFields] = useState<Record<string, string>>({})
 
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
   const courtsForSport = activeCourts.filter((c) => !sportId || !c.sportId || c.sportId === sportId)
 
+  function validate() {
+    const e: Record<string, string> = {}
+    if (!name.trim()) e.name = 'Enter a class name'
+    if (!courtIds.length) e.courtIds = 'Choose at least one court'
+    if (!days.length) e.days = 'Choose at least one day of the week'
+    const s = parseHHmm(start), en = parseHHmm(end)
+    if (s == null) e.start = 'Enter the start time'
+    if (en == null) e.end = 'Enter the end time'
+    else if (s != null && en <= s) e.end = 'End time must be after the start time'
+    if (!startDate) e.startDate = 'Pick the first day of the term'
+    if (!endDate) e.endDate = 'Pick the last day of the term'
+    else if (startDate && endDate < startDate) e.endDate = 'Term end must be on or after the term start'
+    if (capacity !== '' && !(Number.isInteger(Number(capacity)) && Number(capacity) >= 1)) e.capacity = 'Capacity must be 1 or more (or empty for no limit)'
+    if (fee === '' || !(Number(fee) >= 0)) e.fee = 'Enter the fee (0 if free)'
+    return e
+  }
+  const errs: Record<string, string> = { ...(tried ? validate() : {}), ...serverFields }
+
   async function save(skipConflicts = false) {
-    if (!name.trim()) return setError('Class name is required')
-    if (!courtIds.length) return setError('Choose at least one court')
-    if (!days.length) return setError('Choose at least one day')
-    if (!endDate) return setError('Choose an end date for the term')
-    if (fee === '' || !(Number(fee) >= 0)) return setError('Enter a fee (0 if free)')
-    const s = parseHHmm(start), e = parseHHmm(end)
-    if (s == null || e == null || e <= s) return setError('End time must be after start time')
+    setTried(true); setServerFields({})
+    if (Object.keys(validate()).length) { setError(null); setConflicts(null); return }
     setBusy(true); setError(null)
     const body = {
       venueId: ctx.venue.id, name, coachName: coachName || null, sportId: sportId || null, courtIds, days, start, end,
@@ -161,7 +175,8 @@ function ClassForm({ ctx, cls, onClose, onDone }: { ctx: BookingContext; cls: Cl
       const ae = err as ApiError
       const list = (ae.details?.conflicts as Conflict[] | undefined) ?? null
       setConflicts(ae.status === 409 && list ? list : null)
-      setError(ae.message)
+      setServerFields(ae.fields ?? {})
+      setError(ae.fields && Object.keys(ae.fields).length ? null : ae.message)
     } finally { setBusy(false) }
   }
 
@@ -174,8 +189,13 @@ function ClassForm({ ctx, cls, onClose, onDone }: { ctx: BookingContext; cls: Cl
         <button onClick={() => save(false)} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-60 flex items-center gap-2" style={{ background: BRAND_GRADIENT }}>{busy && <Spinner />} {cls ? 'Save class' : 'Create class'}</button>
       </div>}>
       <div className="space-y-4">
+        <FormProblems errors={errs} message={error} conflicts={conflicts}
+          conflictNote="Move or cancel those first, or skip just the clashing sessions (the rest of the class is still reserved)."
+          action={<button onClick={() => save(true)} disabled={busy} className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
+            {cls ? 'Save' : 'Create'} anyway, skipping {conflicts?.length} session{conflicts?.length === 1 ? '' : 's'}
+          </button>} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">{label('Class name *')}<input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="e.g. Junior Coaching" className={inputCls} autoFocus /></div>
+          <div className="sm:col-span-2">{label('Class name *')}<input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="e.g. Junior Coaching" className={fieldCls(errs.name)} aria-invalid={!!errs.name} autoFocus /><FieldError msg={errs.name} /></div>
           <div>{label('Coach')}<input value={coachName} onChange={(e) => setCoachName(e.target.value)} maxLength={80} placeholder="Coach name" className={inputCls} /></div>
           <div>{label('Sport')}
             <select value={sportId} onChange={(e) => setSportId(e.target.value)} className={inputCls}>
@@ -184,49 +204,37 @@ function ClassForm({ ctx, cls, onClose, onDone }: { ctx: BookingContext; cls: Cl
         </div>
 
         <div>{label('Courts *')}
-          <div className="flex flex-wrap gap-2">
+          <div className={`flex flex-wrap gap-2 ${errs.courtIds ? 'rounded-lg ring-2 ring-red-200 bg-red-50/50 p-1.5' : ''}`}>
             {courtsForSport.map((c) => (
               <button key={c.id} type="button" onClick={() => setCourtIds(toggle(courtIds, c.id))}
-                className={`px-3 py-1.5 rounded-lg border text-sm transition-all ${courtIds.includes(c.id) ? 'border-purple-400 bg-purple-50 text-purple-700 font-medium' : 'border-border text-muted-foreground hover:bg-muted'}`}>{c.name}</button>
+                className={`px-3 py-1.5 rounded-lg border text-sm transition-all ${courtIds.includes(c.id) ? 'border-purple-400 bg-purple-50 text-purple-700 font-medium' : 'border-border text-muted-foreground hover:bg-muted'}`}>{c.label}</button>
             ))}
-          </div></div>
+            {courtsForSport.length === 0 && <p className="text-xs text-muted-foreground">No active courts{sportId ? ' for this sport' : ''}.</p>}
+          </div><FieldError msg={errs.courtIds} /></div>
 
         <div>{label('Days *')}
-          <div className="flex flex-wrap gap-1.5">
+          <div className={`flex flex-wrap gap-1.5 ${errs.days ? 'rounded-lg ring-2 ring-red-200 bg-red-50/50 p-1.5' : ''}`}>
             {WEEKDAYS.map((d) => (
               <button key={d} type="button" onClick={() => setDays(toggle(days, d))}
                 className={`w-12 py-1.5 rounded-lg border text-sm transition-all ${days.includes(d) ? 'border-purple-400 bg-purple-50 text-purple-700 font-medium' : 'border-border text-muted-foreground hover:bg-muted'}`}>{d.charAt(0) + d.slice(1, 3).toLowerCase()}</button>
             ))}
-          </div></div>
+          </div><FieldError msg={errs.days} /></div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>{label('Starts at')}<input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={inputCls} /></div>
-          <div>{label('Ends at')}<input type="time" step={300} value={end} onChange={(e) => setEnd(e.target.value)} className={inputCls} /></div>
-          <div>{label('Term start')}<input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} /></div>
-          <div>{label('Term end *')}<input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} /></div>
+          <div>{label('Starts at *')}<input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={fieldCls(errs.start)} aria-invalid={!!errs.start} /><FieldError msg={errs.start} /></div>
+          <div>{label('Ends at *')}<input type="time" step={300} value={end} onChange={(e) => setEnd(e.target.value)} className={fieldCls(errs.end)} aria-invalid={!!errs.end} /><FieldError msg={errs.end} /></div>
+          <div>{label('Term start *')}<input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={fieldCls(errs.startDate)} aria-invalid={!!errs.startDate} /><FieldError msg={errs.startDate} /></div>
+          <div>{label('Term end *')}<input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className={fieldCls(errs.endDate)} aria-invalid={!!errs.endDate} /><FieldError msg={errs.endDate} /></div>
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          <div>{label('Capacity')}<input type="number" min={1} max={500} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="No limit" className={inputCls} /></div>
-          <div>{label('Fee *')}<input type="number" min={0} step="0.01" value={fee} onChange={(e) => setFee(e.target.value)} className={inputCls} /></div>
+          <div>{label('Capacity')}<input type="number" min={1} max={500} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="No limit" className={fieldCls(errs.capacity)} aria-invalid={!!errs.capacity} /><FieldError msg={errs.capacity} /></div>
+          <div>{label('Fee *')}<input type="number" min={0} step="0.01" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0 if free" className={fieldCls(errs.fee)} aria-invalid={!!errs.fee} /><FieldError msg={errs.fee} /></div>
           <div>{label('Per')}<select value={feePeriod} onChange={(e) => setFeePeriod(e.target.value as 'MONTH' | 'TERM')} className={inputCls}><option value="MONTH">Month</option><option value="TERM">Term</option></select></div>
         </div>
 
         {cls && <p className="text-xs text-muted-foreground">Changing days, times, courts or dates re-reserves court time from today; past sessions are kept.</p>}
 
-        {conflicts && conflicts.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-medium text-amber-800 flex items-center gap-2"><AlertTriangle size={14} /> These sessions clash with existing bookings or blocks</p>
-            <ul className="mt-2 max-h-36 overflow-y-auto text-xs text-amber-900 space-y-1">
-              {conflicts.map((c, i) => <li key={i}>{fmtDate(c.date)} · {c.courtName} · {c.what} ({c.time})</li>)}
-            </ul>
-            <p className="text-xs text-amber-800 mt-2">Move or cancel those bookings first, or skip just these sessions.</p>
-            <button onClick={() => save(true)} disabled={busy} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
-              {cls ? 'Save' : 'Create'} anyway, skipping {conflicts.length} session{conflicts.length === 1 ? '' : 's'}
-            </button>
-          </div>
-        )}
-        {error && !conflicts?.length && <p className="text-sm text-red-600">{error}</p>}
       </div>
     </Modal>
   )
@@ -246,7 +254,7 @@ function ClassPanel({ ctx, classId, onClose, onChanged, onEdit }: { ctx: Booking
   const cur = c?.currency ?? ctx.venue.currency
   const active = c?.students.filter((s) => s.status === 'ACTIVE') ?? []
   const full = c?.capacity != null && active.length >= c.capacity
-  const courtName = (id: string) => ctx.courts.find((x) => x.id === id)?.name ?? 'Removed court'
+  const courtName = (id: string) => ctx.courts.find((x) => x.id === id)?.label ?? 'Removed court'
 
   return (
     <>

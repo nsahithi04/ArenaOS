@@ -128,7 +128,7 @@ export function CalendarScreen() {
   // Columns for the time grid
   const days = view === "day" ? [date] : view === "week" ? Array.from({ length: 7 }, (_, i) => addDays(range.from, i)) : [];
   const columns: Column[] = days.flatMap((d) => courts.map((c, i) => ({
-    key: `${d}:${c.id}`, date: d, courtId: c.id, courtName: c.name,
+    key: `${d}:${c.id}`, date: d, courtId: c.id, courtName: c.label,
     dayLabel: view === "week" && i === 0 ? d : undefined, groupStart: view === "week" && i === 0,
   })));
 
@@ -215,7 +215,7 @@ export function CalendarScreen() {
           </select>
           <select value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)} className="px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20" aria-label="Court">
             <option value="">All courts</option>
-            {ctx.courts.filter((c) => c.isActive && (!sportFilter || !c.sportId || c.sportId === sportFilter)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {ctx.courts.filter((c) => c.isActive && (!sportFilter || !c.sportId || c.sportId === sportFilter)).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as StatusFilter)} className="px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20" aria-label="Status">
             <option value="all">All Bookings</option>
@@ -412,7 +412,7 @@ export function CalendarScreen() {
 
       {/* Add-to-slot chooser */}
       {slot && (
-        <Modal title="Add to slot" subtitle={`${ctx.courts.find((c) => c.id === slot.courtId)?.name} · ${fmtDate(slot.date)} · ${fmtTime(slot.startMin)}`} onClose={() => setSlot(null)} width="max-w-xs">
+        <Modal title="Add to slot" subtitle={`${ctx.courts.find((c) => c.id === slot.courtId)?.label} · ${fmtDate(slot.date)} · ${fmtTime(slot.startMin)}`} onClose={() => setSlot(null)} width="max-w-xs">
           <div className="space-y-2">
             {[
               { icon: CalendarPlus, color: "text-blue-600", hover: "hover:bg-blue-50 hover:border-blue-200", title: "New Booking", sub: "Phone, WhatsApp or aggregator", onClick: () => { setForm({ mode: "create", prefill: { courtId: slot.courtId, date: slot.date, startMin: slot.startMin } }); setSlot(null); } },
@@ -436,7 +436,7 @@ export function CalendarScreen() {
       {removeBlock && (
         <ConfirmDialog
           title="Remove this block?"
-          message={`${ctx.courts.find((c) => c.id === removeBlock.courtId)?.name} · ${fmtDate(removeBlock.date)} ${fmtTime(removeBlock.startMin)} – ${fmtTime(removeBlock.endMin)}${removeBlock.reason ? ` (${removeBlock.reason})` : ""}. The court becomes bookable again.`}
+          message={`${ctx.courts.find((c) => c.id === removeBlock.courtId)?.label} · ${fmtDate(removeBlock.date)} ${fmtTime(removeBlock.startMin)} – ${fmtTime(removeBlock.endMin)}${removeBlock.reason ? ` (${removeBlock.reason})` : ""}. The court becomes bookable again.`}
           confirmLabel="Remove block"
           danger
           busy={busy}
@@ -460,7 +460,7 @@ function BlockDialog({ ctx, initial, busy, onClose, onSubmit }: {
   const [reason, setReason] = useState("Maintenance");
   const startMin = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
   return (
-    <Modal title="Block court" subtitle={`${ctx.courts.find((c) => c.id === initial.courtId)?.name} · ${fmtDate(initial.date)}`} onClose={onClose} width="max-w-sm"
+    <Modal title="Block court" subtitle={`${ctx.courts.find((c) => c.id === initial.courtId)?.label} · ${fmtDate(initial.date)}`} onClose={onClose} width="max-w-sm"
       footer={
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted">Cancel</button>

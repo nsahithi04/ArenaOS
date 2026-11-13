@@ -3,6 +3,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { addDays, diffDays, isLocalDate, localDateOf, localMinutesOf, localRangeToUtc } from '@/lib/booking/time'
 import { netPaid } from '@/lib/club/service'
+import { courtLabelSelect, labelOf } from '@/lib/booking/courts'
 
 export const PAYMENT_TYPES = ['BOOKING', 'MEMBERSHIP', 'CLASS', 'TOURNAMENT'] as const
 export type PaymentType = (typeof PAYMENT_TYPES)[number]
@@ -50,7 +51,7 @@ export function ledgerWhere(venueId: string, tz: string, f: LedgerFilters): Pris
 export const ledgerSelect = {
   id: true, kind: true, method: true, amount: true, receivedAt: true, note: true, bookingId: true, membershipId: true, enrollmentId: true, tournamentEntryId: true,
   recordedBy: { select: { name: true } },
-  booking: { select: { customer: true, startTime: true, court: { select: { name: true } } } },
+  booking: { select: { customer: true, startTime: true, court: { select: courtLabelSelect } } },
   membership: { select: { player: { select: { name: true } }, plan: { select: { name: true } } } },
   enrollment: { select: { player: { select: { name: true } }, class: { select: { name: true } } } },
   tournamentEntry: { select: { name: true, tournament: { select: { id: true, name: true } } } },
@@ -62,7 +63,7 @@ export function toLedgerDTO(p: LedgerRow, tz: string) {
   const type: PaymentType = p.bookingId ? 'BOOKING' : p.membershipId ? 'MEMBERSHIP' : p.enrollmentId ? 'CLASS' : 'TOURNAMENT'
   const payer = p.booking?.customer ?? p.membership?.player.name ?? p.enrollment?.player.name ?? p.tournamentEntry?.name ?? '—'
   const detail =
-    type === 'BOOKING' ? `${p.booking!.court.name} · ${localDateOf(p.booking!.startTime, tz)}`
+    type === 'BOOKING' ? `${labelOf(p.booking!.court)} · ${localDateOf(p.booking!.startTime, tz)}`
     : type === 'MEMBERSHIP' ? p.membership!.plan.name
     : type === 'CLASS' ? p.enrollment!.class.name
     : p.tournamentEntry!.tournament.name
@@ -114,7 +115,7 @@ export async function pendingBalances(db: PrismaClient, venueId: string, tz: str
   const [bookings, memberships, enrollments, entrants] = await Promise.all([
     db.booking.findMany({
       where: { venueId, status: { not: 'CANCELLED' }, payment: { not: 'PAID' }, membershipId: null, amountUsd: { gt: 0 } },
-      select: { id: true, customer: true, phone: true, startTime: true, amountUsd: true, court: { select: { name: true } }, payments: { select: { kind: true, amount: true } } },
+      select: { id: true, customer: true, phone: true, startTime: true, amountUsd: true, court: { select: courtLabelSelect }, payments: { select: { kind: true, amount: true } } },
       orderBy: { startTime: 'asc' },
       take: 2000,
     }),
@@ -137,7 +138,7 @@ export async function pendingBalances(db: PrismaClient, venueId: string, tz: str
   for (const b of bookings) {
     const paid = netPaid(b.payments)
     const total = Number(b.amountUsd)
-    push({ type: 'BOOKING', targetId: b.id, tournamentId: null, payer: b.customer, phone: b.phone, detail: `Court booking · ${b.court.name}`, date: localDateOf(b.startTime, tz), total, paid, due: total - paid, note: null })
+    push({ type: 'BOOKING', targetId: b.id, tournamentId: null, payer: b.customer, phone: b.phone, detail: `Court booking · ${labelOf(b.court)}`, date: localDateOf(b.startTime, tz), total, paid, due: total - paid, note: null })
   }
   for (const m of memberships) {
     const paid = netPaid(m.payments)

@@ -8,6 +8,7 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
 
 - **Accounts:** email and password sign-up with email verification, password reset by code, and staff invitations
 - **Venue onboarding:** a guided setup (facility → sports → hours → courts → pricing → review), editable later under Venue Settings
+- **Courts:** two courts may share a name if they're for different sports (e.g. "Court 1" for Pickleball and for Badminton). Courts are shown with their sport ("Court 1 · Pickleball") everywhere
 - **Bookings:**
   - create, edit, reschedule, cancel or reinstate, check in, complete
   - prices calculated from your pricing rules (or set by hand)
@@ -22,8 +23,10 @@ Venue owners set up their facility, sports, courts, operating hours and pricing,
   - date ranges: today, this week, this month or custom
 - **Memberships:** monthly or yearly plans (optionally for one sport) sold at the front desk, with full or partial payment. Members play free: staff pick "Member" when booking a walk-in or phone call, and the court time is covered as long as the membership is valid on that date.
 - **Classes:** coaching or group classes with a coach, courts, days, times and a term. Every session reserves its courts automatically, using the same no-overlap protection as bookings. Clashes with existing bookings are listed before anything is saved. Includes enrolment with capacity limits and per-month or per-term fees.
-- **Tournaments:** knockout events (singles, doubles or teams) that reserve chosen courts every day of the event. They include entries with fees and seeds, a seeded draw with automatic byes, a visual bracket where results move winners into the next round, walkovers, corrections, champion and placings, and prize tracking.
+- **Tournaments:** knockout events (singles, doubles or teams) that reserve chosen courts every day of the event. If something is already on a court (a booking, class or maintenance block), the clash is listed by court, day and time, and the tournament can reserve just the free time around it. They include entries with fees and seeds, a seeded draw with automatic byes (registration can be reopened after the draw until the first result is recorded), a visual bracket where results move winners into the next round, walkovers, corrections, champion and placings, and prize tracking.
 - **Payments** (owners and managers): a ledger of every payment and refund across bookings, memberships, classes and tournaments, each as its own row, with search, filters, sorting, totals and CSV export. A **Pending** tab lists everything still owed (part payments included). A **Renewals** tab lists memberships ending soon or recently ended, with renewal reminder emails and one-click renew.
+- **Staff:** a weekly shift schedule with drafts, **Publish & notify** (email and in-app notification to each person) and copy last week. Staff get a **My Shifts** page with clock in / clock out. Time sheets can be corrected by managers. Payroll covers hourly or monthly-salary pay with scheduled vs worked hours, earnings, payouts and balance owed. Managers see and pay employees only; the owner sees everyone.
+- **Notifications:** the bell shows in-app notifications (published shifts, cancellations, payouts) with an unread count.
 - **Team and permissions:** three levels, enforced on the server:
   | | Owner | Manager | Employee |
   |---|---|---|---|
@@ -75,6 +78,7 @@ lib/
   club/              memberships, classes, enrolments, schedules
   tournaments/       knockout bracket logic, tournament service
   payments/          payments ledger, outstanding balances, renewals
+  staff/             shifts, clock in/out, payroll maths, staff permissions
   booking/           booking engine: time zones, pricing, availability, validation,
                      access control, service (transactions), queries, dashboard metrics
   db.ts, mail.ts, cloudinary.ts, permissions.ts, slug.ts

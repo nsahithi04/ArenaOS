@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarDays, Clock, Plus, Trash2, Trophy, Users } from 'lucide-react'
+import { CalendarDays, Clock, Plus, Trash2, Trophy, Users } from 'lucide-react'
 import {
-  api, ApiError, Badge, BRAND_GRADIENT, ErrorState, fmtDate, fmtTime, hhmm, inputCls, Modal, money, parseHHmm, Spinner, useBookingContext,
-  type BookingContext,
+  api, ApiError, Badge, BRAND_GRADIENT, ErrorState, FieldError, fieldCls, fmtDate, fmtTime, FormProblems, hhmm, inputCls, Modal, money, parseHHmm, Spinner, useBookingContext,
+  type BookingContext, type Conflict,
 } from '@/components/bookings/shared'
 
 type Row = {
@@ -20,7 +20,6 @@ export type TournamentForEdit = {
   id: string; name: string; description: string | null; sportId: string | null; courtIds: string[]; startDate: string; endDate: string
   startMin: number; endMin: number; entryType: 'SINGLES' | 'DOUBLES' | 'TEAM'; maxEntrants: number | null; entryFee: number; prizes: Prize[]
 }
-type Conflict = { date: string; courtName: string; what: string; time: string }
 
 export const STATUS_STYLE: Record<Status, { label: string; bg: string; color: string }> = {
   REGISTRATION: { label: 'Registration open', bg: '#eff6ff', color: '#2563eb' },
@@ -126,16 +125,34 @@ export function TournamentForm({ ctx, t, onClose, onDone }: { ctx: BookingContex
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null)
+  const [tried, setTried] = useState(false)
+  const [serverFields, setServerFields] = useState<Record<string, string>>({})
   const courts = ctx.courts.filter((c) => c.isActive && (!sportId || !c.sportId || c.sportId === sportId))
 
+  function validate() {
+    const e: Record<string, string> = {}
+    if (!name.trim()) e.name = 'Enter a tournament name'
+    if (!courtIds.length) e.courtIds = 'Choose at least one court to reserve'
+    if (!startDate) e.startDate = 'Pick the first day'
+    if (!endDate) e.endDate = 'Pick the last day'
+    else if (startDate && endDate < startDate) e.endDate = 'Last day must be on or after the first day'
+    const s = parseHHmm(start), en = parseHHmm(end)
+    if (s == null) e.start = 'Enter the daily start time'
+    if (en == null) e.end = 'Enter the daily end time'
+    else if (s != null && en <= s) e.end = 'Daily end time must be after the start time'
+    if (maxEntrants !== '' && !(Number.isInteger(Number(maxEntrants)) && Number(maxEntrants) >= 2)) e.maxEntrants = 'Maximum entries must be 2 or more (or empty for no limit)'
+    if (entryFee === '' || !(Number(entryFee) >= 0)) e.entryFee = 'Enter the entry fee (0 if free)'
+    prizes.forEach((p, i) => {
+      if (!p.label.trim()) e[`prize${i}`] = `Prize ${i + 1} needs a label`
+      else if (!(Number(p.amount) >= 0)) e[`prize${i}`] = `Prize "${p.label}" needs an amount of 0 or more`
+    })
+    return e
+  }
+  const errs: Record<string, string> = { ...(tried ? validate() : {}), ...serverFields }
+
   async function save(skipConflicts = false) {
-    if (!name.trim()) return setError('Tournament name is required')
-    if (!courtIds.length) return setError('Choose at least one court')
-    if (endDate < startDate) return setError('End date must be on or after the start date')
-    const s = parseHHmm(start), e = parseHHmm(end)
-    if (s == null || e == null || e <= s) return setError('Daily end time must be after the start time')
-    if (entryFee === '' || !(Number(entryFee) >= 0)) return setError('Enter the entry fee (0 if free)')
-    if (prizes.some((p) => !p.label.trim() || !(Number(p.amount) >= 0))) return setError('Each prize needs a label and an amount')
+    setTried(true); setServerFields({})
+    if (Object.keys(validate()).length) { setError(null); setConflicts(null); return }
     setBusy(true); setError(null)
     const body = {
       venueId: ctx.venue.id, name, description: description || null, sportId: sportId || null, courtIds, startDate, endDate, start, end,
@@ -144,15 +161,17 @@ export function TournamentForm({ ctx, t, onClose, onDone }: { ctx: BookingContex
     }
     try {
       const r = t
-        ? await api<{ id: string; sessions: number | null; skipped: number }>(`/api/tournaments/${t.id}`, { method: 'PATCH', json: body })
-        : await api<{ id: string; sessions: number; skipped: number }>('/api/tournaments', { method: 'POST', json: body })
-      toast.success(t ? 'Tournament updated' : `Tournament created${r.sessions != null ? ` · courts reserved` : ''}${r.skipped ? ` (${r.skipped} clashing slot${r.skipped === 1 ? '' : 's'} skipped)` : ''}`)
+        ? await api<{ id: string; sessions: number | null; skipped: number; trimmed?: number }>(`/api/tournaments/${t.id}`, { method: 'PATCH', json: body })
+        : await api<{ id: string; sessions: number; skipped: number; trimmed?: number }>('/api/tournaments', { method: 'POST', json: body })
+      const around = (r.trimmed ?? 0) + r.skipped
+      toast.success(`${t ? 'Tournament updated' : 'Tournament created'}${r.sessions != null ? ' · courts reserved' : ''}${around ? ` around ${around} existing booking${around === 1 ? '' : 's'}/block${around === 1 ? '' : 's'}` : ''}`)
       onDone(r.id)
     } catch (err) {
       const ae = err as ApiError
       const list = (ae.details?.conflicts as Conflict[] | undefined) ?? null
       setConflicts(ae.status === 409 && list ? list : null)
-      setError(ae.message)
+      setServerFields(ae.fields ?? {})
+      setError(ae.fields && Object.keys(ae.fields).length ? null : ae.message)
     } finally { setBusy(false) }
   }
 
@@ -166,34 +185,40 @@ export function TournamentForm({ ctx, t, onClose, onDone }: { ctx: BookingContex
         <button onClick={() => save(false)} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-60 flex items-center gap-2" style={{ background: BRAND_GRADIENT }}>{busy && <Spinner />} {t ? 'Save' : 'Create tournament'}</button>
       </div>}>
       <div className="space-y-4">
+        <FormProblems errors={errs} message={error} conflicts={conflicts}
+          conflictNote={<>Courts will be reserved only for the free time around these, e.g. 9:00 AM – 5:00 PM and 6:00 PM – 9:00 PM around a 5–6 PM class. Or move/cancel them first.</>}
+          action={<button onClick={() => save(true)} disabled={busy} className="px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
+            {t ? 'Save' : 'Create'} and reserve around {conflicts?.length === 1 ? 'it' : 'them'}
+          </button>} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">{label('Name *')}<input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="e.g. Winter Open" className={inputCls} autoFocus /></div>
+          <div className="sm:col-span-2">{label('Name *')}<input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} placeholder="e.g. Winter Open" className={fieldCls(errs.name)} aria-invalid={!!errs.name} autoFocus /><FieldError msg={errs.name} /></div>
           <div>{label('Sport')}<select value={sportId} onChange={(e) => setSportId(e.target.value)} className={inputCls}><option value="">Any</option>{ctx.sports.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div>{label('Format')}<select value={entryType} onChange={(e) => setEntryType(e.target.value as typeof entryType)} className={inputCls}><option value="SINGLES">Singles knockout</option><option value="DOUBLES">Doubles knockout</option><option value="TEAM">Team knockout</option></select></div>
         </div>
         <div>{label('Courts reserved *')}
-          <div className="flex flex-wrap gap-2">
+          <div className={`flex flex-wrap gap-2 ${errs.courtIds ? 'rounded-lg ring-2 ring-red-200 bg-red-50/50 p-1.5' : ''}`}>
             {courts.map((c) => (
               <button key={c.id} type="button" onClick={() => toggle(c.id)}
-                className={`px-3 py-1.5 rounded-lg border text-sm ${courtIds.includes(c.id) ? 'border-amber-400 bg-amber-50 text-amber-800 font-medium' : 'border-border text-muted-foreground hover:bg-muted'}`}>{c.name}</button>
+                className={`px-3 py-1.5 rounded-lg border text-sm ${courtIds.includes(c.id) ? 'border-amber-400 bg-amber-50 text-amber-800 font-medium' : 'border-border text-muted-foreground hover:bg-muted'}`}>{c.label}</button>
             ))}
-          </div></div>
+            {courts.length === 0 && <p className="text-xs text-muted-foreground">No active courts{sportId ? ' for this sport' : ''}.</p>}
+          </div><FieldError msg={errs.courtIds} /></div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>{label('From')}<input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value) }} className={inputCls} /></div>
-          <div>{label('To')}<input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} /></div>
-          <div>{label('Daily start')}<input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={inputCls} /></div>
-          <div>{label('Daily end')}<input type="time" step={300} value={end} onChange={(e) => setEnd(e.target.value)} className={inputCls} /></div>
+          <div>{label('From *')}<input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value) }} className={fieldCls(errs.startDate)} aria-invalid={!!errs.startDate} /><FieldError msg={errs.startDate} /></div>
+          <div>{label('To *')}<input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className={fieldCls(errs.endDate)} aria-invalid={!!errs.endDate} /><FieldError msg={errs.endDate} /></div>
+          <div>{label('Daily start *')}<input type="time" step={300} value={start} onChange={(e) => setStart(e.target.value)} className={fieldCls(errs.start)} aria-invalid={!!errs.start} /><FieldError msg={errs.start} /></div>
+          <div>{label('Daily end *')}<input type="time" step={300} value={end} onChange={(e) => setEnd(e.target.value)} className={fieldCls(errs.end)} aria-invalid={!!errs.end} /><FieldError msg={errs.end} /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>{label('Maximum entries')}<input type="number" min={2} max={256} value={maxEntrants} onChange={(e) => setMaxEntrants(e.target.value)} placeholder="No limit" className={inputCls} /></div>
-          <div>{label('Entry fee *')}<input type="number" min={0} step="0.01" value={entryFee} onChange={(e) => setEntryFee(e.target.value)} className={inputCls} /></div>
+          <div>{label('Maximum entries')}<input type="number" min={2} max={256} value={maxEntrants} onChange={(e) => setMaxEntrants(e.target.value)} placeholder="No limit" className={fieldCls(errs.maxEntrants)} aria-invalid={!!errs.maxEntrants} /><FieldError msg={errs.maxEntrants} /></div>
+          <div>{label('Entry fee *')}<input type="number" min={0} step="0.01" value={entryFee} onChange={(e) => setEntryFee(e.target.value)} placeholder="0 if free" className={fieldCls(errs.entryFee)} aria-invalid={!!errs.entryFee} /><FieldError msg={errs.entryFee} /></div>
         </div>
         <div>
           {label('Prizes (in finishing order)')}
           <div className="space-y-2">
             {prizes.map((p, i) => (
               <div key={i} className="flex gap-2">
-                <input value={p.label} onChange={(e) => setPrizes(prizes.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} maxLength={40} placeholder={i === 0 ? 'Winner' : i === 1 ? 'Runner-up' : 'Semi-finalists'} className={inputCls} />
+                <input value={p.label} onChange={(e) => setPrizes(prizes.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} maxLength={40} placeholder={i === 0 ? 'Winner' : i === 1 ? 'Runner-up' : 'Semi-finalists'} className={fieldCls(errs[`prize${i}`])} aria-invalid={!!errs[`prize${i}`]} />
                 <input type="number" min={0} step="0.01" value={p.amount} onChange={(e) => setPrizes(prizes.map((x, j) => (j === i ? { ...x, amount: Number(e.target.value) } : x)))} className={`${inputCls} w-32`} />
                 <button type="button" onClick={() => setPrizes(prizes.filter((_, j) => j !== i))} aria-label="Remove prize" className="px-2 rounded-lg border border-border text-muted-foreground hover:bg-muted"><Trash2 size={14} /></button>
               </div>
@@ -205,19 +230,6 @@ export function TournamentForm({ ctx, t, onClose, onDone }: { ctx: BookingContex
         <div>{label('Notes')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} rows={2} placeholder="Rules, format, contact…" className={inputCls} /></div>
         {t && <p className="text-xs text-muted-foreground">Changing courts, dates or times re-reserves court time from today.</p>}
 
-        {conflicts && conflicts.length > 0 && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-medium text-amber-800 flex items-center gap-2"><AlertTriangle size={14} /> These court times already have bookings or blocks</p>
-            <ul className="mt-2 max-h-36 overflow-y-auto text-xs text-amber-900 space-y-1">
-              {conflicts.map((c, i) => <li key={i}>{fmtDate(c.date)} · {c.courtName} · {c.what} ({c.time})</li>)}
-            </ul>
-            <p className="text-xs text-amber-800 mt-2">Move or cancel those bookings first, or reserve everything except those days on those courts.</p>
-            <button onClick={() => save(true)} disabled={busy} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
-              {t ? 'Save' : 'Create'} anyway, skipping {conflicts.length}
-            </button>
-          </div>
-        )}
-        {error && !conflicts?.length && <p className="text-sm text-red-600">{error}</p>}
       </div>
     </Modal>
   )

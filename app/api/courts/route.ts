@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { courtNameKey } from '@/lib/booking/courts'
 import { handleError, readJson, requireVenue } from '@/lib/booking/route-helpers'
 
 // GET /api/courts?venueId — active courts (needs bookings:view)
@@ -27,6 +28,12 @@ export async function POST(req: Request) {
     if (typeof sportId === 'string' && sportId) {
       const sport = await prisma.sport.findFirst({ where: { id: sportId, venueId: ctx.access.venueId } })
       if (!sport) return NextResponse.json({ error: 'Sport not found for this venue' }, { status: 400 })
+    }
+
+    const sid = typeof sportId === 'string' && sportId ? sportId : null
+    const same = await prisma.court.findMany({ where: { venueId: ctx.access.venueId, sportId: sid, isActive: true }, select: { name: true } })
+    if (same.some((c) => courtNameKey(c.name) === courtNameKey(name))) {
+      return NextResponse.json({ error: `There is already a court named "${name.trim()}" for this sport. Use a different name.`, code: 'COURT_NAME' }, { status: 422 })
     }
 
     const court = await prisma.court.create({

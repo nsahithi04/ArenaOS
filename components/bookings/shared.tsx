@@ -2,7 +2,7 @@
 
 // Client-side helpers shared by the Bookings, Calendar and Dashboard screens.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { canChangeBookingOn, canCheckInOn, correctionWindowDays, lockMessage } from '@/lib/booking/locks'
 
 // ─── Types mirrored from the API ────────────────────────────────────────────
@@ -66,7 +66,7 @@ export type HoursRow = { sportId: string | null; day: string; openTime: string; 
 export type BookingContext = {
   venue: { id: string; name: string; timezone: string; currency: string }
   today: string
-  courts: { id: string; name: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
+  courts: { id: string; name: string; label: string; sportId: string | null; isActive: boolean; isAvailable: boolean; type: string }[]
   sports: { id: string; name: string; emoji: string | null }[]
   hours: HoursRow[]
   permissions: { isOwner: boolean; canEditBookings: boolean; canRefund: boolean; canViewReports: boolean; canManageVenue: boolean; canViewBilling: boolean }
@@ -384,4 +384,67 @@ export function canCheckInToday(ctx: BookingContext, date: string) {
 export function earliestEditableDate(ctx: BookingContext): string | undefined {
   const days = correctionWindowDays(lockActorFromCtx(ctx))
   return Number.isFinite(days) ? addDays(ctx.today, -days) : undefined
+}
+
+// ─── Form problems ──────────────────────────────────────────────────────────
+
+/** inputCls with a red outline when `bad` is set. */
+export function fieldCls(bad?: unknown, base: string = inputCls) {
+  return bad ? base.replace('border-border', 'border-red-400 ring-2 ring-red-100').replace('focus:ring-primary/20', 'focus:ring-red-200 focus:border-red-400') : base
+}
+
+export function FieldError({ msg }: { msg?: string | null }) {
+  return msg ? <p className="mt-1 text-[11px] text-red-600">{msg}</p> : null
+}
+
+export type Conflict = { date: string; courtName: string; what: string; time: string }
+
+/**
+ * Shown at the top of a form: what's missing or invalid, and any court clashes
+ * (each with court, day, time and what's in the way). Scrolls itself into view
+ * whenever its content changes so it is never missed below the fold.
+ */
+export function FormProblems({ errors, message, conflicts, conflictNote, action }: {
+  errors?: Record<string, string>
+  message?: string | null
+  conflicts?: Conflict[] | null
+  conflictNote?: React.ReactNode
+  action?: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const list = Object.values(errors ?? {})
+  const hasConflicts = !!conflicts?.length
+  const key = `${list.join('|')}#${message ?? ''}#${conflicts?.length ?? 0}`
+  useEffect(() => {
+    if (key !== '##0') ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [key])
+  if (!list.length && !message && !hasConflicts) return null
+  return (
+    <div ref={ref} className="space-y-2 scroll-mt-4" role="alert">
+      {(list.length > 0 || (message && !hasConflicts)) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-medium">{list.length ? `Please fix ${list.length === 1 ? 'this' : `these ${list.length}`} before saving:` : message}</p>
+          {list.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs space-y-0.5">{list.map((m, i) => <li key={i}>{m}</li>)}</ul>}
+        </div>
+      )}
+      {hasConflicts && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+          <p className="text-sm font-medium text-amber-900">
+            {conflicts!.length} clash{conflicts!.length === 1 ? '' : 'es'} with bookings or blocks already on these courts
+          </p>
+          <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-amber-900 space-y-1">
+            {conflicts!.map((c, i) => (
+              <li key={i} className="flex flex-wrap gap-x-1.5">
+                <span className="font-medium">{c.courtName}</span>
+                <span>· {fmtDate(c.date, { weekday: 'short', month: 'short', day: 'numeric' })} · {c.time}</span>
+                <span className="text-amber-800">— {c.what}</span>
+              </li>
+            ))}
+          </ul>
+          {conflictNote && <p className="text-xs text-amber-800 mt-2">{conflictNote}</p>}
+          {action && <div className="mt-2">{action}</div>}
+        </div>
+      )}
+    </div>
+  )
 }

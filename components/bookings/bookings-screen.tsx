@@ -211,7 +211,7 @@ export function BookingsScreen() {
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 p-2 border-t border-border">
             <select value={filters.courtId} onChange={(e) => setFilters({ ...filters, courtId: e.target.value })} className={inputCls} aria-label="Court">
               <option value="">All courts</option>
-              {ctx.courts.map((c) => <option key={c.id} value={c.id}>{c.name}{!c.isActive ? " (removed)" : ""}</option>)}
+              {ctx.courts.map((c) => <option key={c.id} value={c.id}>{c.label}{!c.isActive ? " (removed)" : ""}</option>)}
             </select>
             <select value={filters.sportId} onChange={(e) => setFilters({ ...filters, sportId: e.target.value })} className={inputCls} aria-label="Sport">
               <option value="">All sports</option>
